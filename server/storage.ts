@@ -11,15 +11,16 @@ export interface IStorage {
   // Machines
   getMachines(): Promise<Machine[]>;
   getMachine(id: string): Promise<Machine | undefined>;
-  createMachine(machine: InsertMachine): Promise<Machine>;
-  updateMachine(id: string, updates: Partial<InsertMachine>): Promise<Machine | undefined>;
-  updateMachineStatus(id: string, status: MachineStatus): Promise<Machine | undefined>;
+  createMachine(machine: InsertMachine, operatorId?: string): Promise<Machine>;
+  updateMachine(id: string, updates: Partial<InsertMachine>, operatorId?: string): Promise<Machine | undefined>;
+  updateMachineStatus(id: string, status: MachineStatus, operatorId?: string): Promise<Machine | undefined>;
   updateMachineOperator(id: string, operatorId: string | null): Promise<Machine | undefined>;
   deleteMachine(id: string): Promise<boolean>;
 
   // Operators
   getOperators(): Promise<Operator[]>;
   getOperator(id: string): Promise<Operator | undefined>;
+  getOperatorByInitials(initials: string): Promise<Operator | undefined>;
   createOperator(operator: InsertOperator): Promise<Operator>;
   updateOperator(id: string, updates: Partial<InsertOperator>): Promise<Operator | undefined>;
   deleteOperator(id: string): Promise<boolean>;
@@ -28,14 +29,14 @@ export interface IStorage {
   getMaintenanceLogs(): Promise<MaintenanceLog[]>;
   getMaintenanceLog(id: string): Promise<MaintenanceLog | undefined>;
   getMaintenanceLogsByMachine(machineId: string): Promise<MaintenanceLog[]>;
-  createMaintenanceLog(log: InsertMaintenanceLog): Promise<MaintenanceLog>;
-  updateMaintenanceLog(id: string, updates: Partial<InsertMaintenanceLog>): Promise<MaintenanceLog | undefined>;
+  createMaintenanceLog(log: InsertMaintenanceLog, operatorId?: string): Promise<MaintenanceLog>;
+  updateMaintenanceLog(id: string, updates: Partial<InsertMaintenanceLog>, operatorId?: string): Promise<MaintenanceLog | undefined>;
   deleteMaintenanceLog(id: string): Promise<boolean>;
 
   // Production Stats
   getProductionStats(): Promise<ProductionStat[]>;
   getProductionStatsByMachine(machineId: string): Promise<ProductionStat[]>;
-  createProductionStat(stat: InsertProductionStat): Promise<ProductionStat>;
+  createProductionStat(stat: InsertProductionStat, operatorId?: string): Promise<ProductionStat>;
 }
 
 export class MemStorage implements IStorage {
@@ -94,7 +95,11 @@ export class MemStorage implements IStorage {
         targetUnits: 100,
         cycleTime: 48.5,
         efficiency: 88,
-        lastUpdated: "5 min ago"
+        lastUpdated: "5 min ago",
+        createdAt: now,
+        updatedAt: now,
+        createdBy: "op-2",
+        updatedBy: "op-2"
       },
       { 
         id: "m-3", 
@@ -106,7 +111,11 @@ export class MemStorage implements IStorage {
         targetUnits: 80,
         cycleTime: 32.1,
         efficiency: 75,
-        lastUpdated: "15 min ago"
+        lastUpdated: "15 min ago",
+        createdAt: now,
+        updatedAt: now,
+        createdBy: "op-3",
+        updatedBy: null
       },
       { 
         id: "m-4", 
@@ -118,7 +127,11 @@ export class MemStorage implements IStorage {
         targetUnits: 150,
         cycleTime: null,
         efficiency: null,
-        lastUpdated: "1 hour ago"
+        lastUpdated: "1 hour ago",
+        createdAt: now,
+        updatedAt: now,
+        createdBy: "op-4",
+        updatedBy: null
       },
       { 
         id: "m-5", 
@@ -130,7 +143,11 @@ export class MemStorage implements IStorage {
         targetUnits: 100,
         cycleTime: 28.7,
         efficiency: 95,
-        lastUpdated: "1 min ago"
+        lastUpdated: "1 min ago",
+        createdAt: now,
+        updatedAt: now,
+        createdBy: "op-3",
+        updatedBy: "op-3"
       },
       { 
         id: "m-6", 
@@ -142,7 +159,11 @@ export class MemStorage implements IStorage {
         targetUnits: 50,
         cycleTime: null,
         efficiency: null,
-        lastUpdated: "30 min ago"
+        lastUpdated: "30 min ago",
+        createdAt: now,
+        updatedAt: now,
+        createdBy: "op-4",
+        updatedBy: "op-4"
       },
     ];
     machines.forEach(m => this.machines.set(m.id, m));
@@ -158,7 +179,11 @@ export class MemStorage implements IStorage {
         scheduledDate: "2024-01-15",
         completedDate: null,
         technician: "Bob Wilson",
-        notes: "Waiting for replacement seals"
+        notes: "Waiting for replacement seals",
+        createdAt: now,
+        updatedAt: now,
+        createdBy: "op-1",
+        updatedBy: null
       },
       {
         id: "ml-2",
@@ -169,7 +194,11 @@ export class MemStorage implements IStorage {
         scheduledDate: "2024-01-20",
         completedDate: null,
         technician: "Tom Davis",
-        notes: null
+        notes: null,
+        createdAt: now,
+        updatedAt: now,
+        createdBy: "op-2",
+        updatedBy: null
       },
       {
         id: "ml-3",
@@ -180,7 +209,11 @@ export class MemStorage implements IStorage {
         scheduledDate: "2024-01-10",
         completedDate: "2024-01-10",
         technician: "Tom Davis",
-        notes: "All tools within tolerance"
+        notes: "All tools within tolerance",
+        createdAt: now,
+        updatedAt: now,
+        createdBy: "op-3",
+        updatedBy: "op-3"
       },
     ];
     maintenanceLogs.forEach(ml => this.maintenanceLogs.set(ml.id, ml));
@@ -195,9 +228,9 @@ export class MemStorage implements IStorage {
     return this.machines.get(id);
   }
 
-  async createMachine(machine: InsertMachine): Promise<Machine> {
+  async createMachine(machine: InsertMachine, operatorId?: string): Promise<Machine> {
     const id = randomUUID();
-    const now = new Date().toLocaleTimeString();
+    const now = new Date().toISOString();
     const newMachine: Machine = { 
       ...machine, 
       id,
@@ -207,33 +240,42 @@ export class MemStorage implements IStorage {
       efficiency: machine.efficiency ?? null,
       operatorId: machine.operatorId ?? null,
       lastUpdated: `Created at ${now}`,
+      createdAt: now,
+      updatedAt: now,
+      createdBy: operatorId ?? null,
+      updatedBy: null
     };
     this.machines.set(id, newMachine);
     return newMachine;
   }
 
-  async updateMachine(id: string, updates: Partial<InsertMachine>): Promise<Machine | undefined> {
+  async updateMachine(id: string, updates: Partial<InsertMachine>, operatorId?: string): Promise<Machine | undefined> {
     const machine = this.machines.get(id);
     if (!machine) return undefined;
     
-    const now = new Date().toLocaleTimeString();
+    const now = new Date().toISOString();
     const updatedMachine: Machine = { 
       ...machine, 
       ...updates,
       lastUpdated: `Updated at ${now}`,
+      updatedAt: now,
+      updatedBy: operatorId ?? null
     };
     this.machines.set(id, updatedMachine);
     return updatedMachine;
   }
 
-  async updateMachineStatus(id: string, status: MachineStatus): Promise<Machine | undefined> {
+  async updateMachineStatus(id: string, status: MachineStatus, operatorId?: string): Promise<Machine | undefined> {
     const machine = this.machines.get(id);
     if (!machine) return undefined;
     
+    const now = new Date().toISOString();
     const updatedMachine: Machine = { 
       ...machine, 
       status,
       lastUpdated: "Just now",
+      updatedAt: now,
+      updatedBy: operatorId ?? null
     };
     this.machines.set(id, updatedMachine);
     return updatedMachine;
@@ -243,10 +285,13 @@ export class MemStorage implements IStorage {
     const machine = this.machines.get(id);
     if (!machine) return undefined;
     
+    const now = new Date().toISOString();
     const updatedMachine: Machine = { 
       ...machine, 
       operatorId,
       lastUpdated: "Just now",
+      updatedAt: now,
+      updatedBy: operatorId ?? null
     };
     this.machines.set(id, updatedMachine);
     return updatedMachine;
@@ -265,9 +310,20 @@ export class MemStorage implements IStorage {
     return this.operators.get(id);
   }
 
+  async getOperatorByInitials(initials: string): Promise<Operator | undefined> {
+    return Array.from(this.operators.values()).find(op => op.initials.toUpperCase() === initials.toUpperCase());
+  }
+
   async createOperator(operator: InsertOperator): Promise<Operator> {
     const id = randomUUID();
-    const newOperator: Operator = { ...operator, id };
+    const now = new Date().toISOString();
+    const newOperator: Operator = { 
+      ...operator, 
+      id,
+      password: operator.password ?? "",
+      createdAt: now,
+      updatedAt: now
+    };
     this.operators.set(id, newOperator);
     return newOperator;
   }
@@ -276,7 +332,12 @@ export class MemStorage implements IStorage {
     const operator = this.operators.get(id);
     if (!operator) return undefined;
     
-    const updatedOperator: Operator = { ...operator, ...updates };
+    const now = new Date().toISOString();
+    const updatedOperator: Operator = { 
+      ...operator, 
+      ...updates,
+      updatedAt: now
+    };
     this.operators.set(id, updatedOperator);
     return updatedOperator;
   }
@@ -306,8 +367,9 @@ export class MemStorage implements IStorage {
     );
   }
 
-  async createMaintenanceLog(log: InsertMaintenanceLog): Promise<MaintenanceLog> {
+  async createMaintenanceLog(log: InsertMaintenanceLog, operatorId?: string): Promise<MaintenanceLog> {
     const id = randomUUID();
+    const now = new Date().toISOString();
     const newLog: MaintenanceLog = { 
       ...log, 
       id,
@@ -315,6 +377,10 @@ export class MemStorage implements IStorage {
       completedDate: log.completedDate ?? null,
       technician: log.technician ?? null,
       notes: log.notes ?? null,
+      createdAt: now,
+      updatedAt: now,
+      createdBy: operatorId ?? null,
+      updatedBy: null
     };
     this.maintenanceLogs.set(id, newLog);
     
@@ -322,18 +388,30 @@ export class MemStorage implements IStorage {
     if (log.status === "in-progress") {
       const machine = this.machines.get(log.machineId);
       if (machine) {
-        this.machines.set(log.machineId, { ...machine, status: "maintenance" as MachineStatus });
+        const now = new Date().toISOString();
+        this.machines.set(log.machineId, { 
+          ...machine, 
+          status: "maintenance" as MachineStatus,
+          updatedAt: now,
+          updatedBy: operatorId ?? null
+        });
       }
     }
     
     return newLog;
   }
 
-  async updateMaintenanceLog(id: string, updates: Partial<InsertMaintenanceLog>): Promise<MaintenanceLog | undefined> {
+  async updateMaintenanceLog(id: string, updates: Partial<InsertMaintenanceLog>, operatorId?: string): Promise<MaintenanceLog | undefined> {
     const log = this.maintenanceLogs.get(id);
     if (!log) return undefined;
     
-    const updatedLog: MaintenanceLog = { ...log, ...updates };
+    const now = new Date().toISOString();
+    const updatedLog: MaintenanceLog = { 
+      ...log, 
+      ...updates,
+      updatedAt: now,
+      updatedBy: operatorId ?? null
+    };
     this.maintenanceLogs.set(id, updatedLog);
     return updatedLog;
   }
@@ -353,13 +431,16 @@ export class MemStorage implements IStorage {
     );
   }
 
-  async createProductionStat(stat: InsertProductionStat): Promise<ProductionStat> {
+  async createProductionStat(stat: InsertProductionStat, operatorId?: string): Promise<ProductionStat> {
     const id = randomUUID();
+    const now = new Date().toISOString();
     const newStat: ProductionStat = { 
       ...stat, 
       id,
       downtime: stat.downtime ?? 0,
       efficiency: stat.efficiency ?? null,
+      createdAt: now,
+      createdBy: operatorId ?? null
     };
     this.productionStats.set(id, newStat);
     return newStat;
