@@ -1,6 +1,36 @@
-import { pgTable, text, varchar, integer, real, timestamp } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { pgTable, text, varchar, integer, real, timestamp, jsonb, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+
+// === REPLIT AUTH TABLES ===
+
+// Session storage table (REQUIRED for Replit Auth)
+export const sessions = pgTable(
+  "sessions",
+  {
+    sid: varchar("sid").primaryKey(),
+    sess: jsonb("sess").notNull(),
+    expire: timestamp("expire").notNull(),
+  },
+  (table) => [index("IDX_session_expire").on(table.expire)],
+);
+
+// User storage table (REQUIRED for Replit Auth)
+export const users = pgTable("users", {
+  id: varchar("id").primaryKey(),
+  email: varchar("email").unique(),
+  firstName: varchar("first_name"),
+  lastName: varchar("last_name"),
+  profileImageUrl: varchar("profile_image_url"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type UpsertUser = typeof users.$inferInsert;
+export type User = typeof users.$inferSelect;
+
+// === MANUFACTURING APP TABLES ===
 
 // Machine status enum
 export const machineStatuses = ["running", "idle", "maintenance", "down", "setup"] as const;
@@ -81,14 +111,3 @@ export const productionStats = pgTable("production_stats", {
 export const insertProductionStatSchema = createInsertSchema(productionStats).omit({ id: true, createdAt: true, createdBy: true });
 export type InsertProductionStat = z.infer<typeof insertProductionStatSchema>;
 export type ProductionStat = typeof productionStats.$inferSelect;
-
-// Session/Auth
-export const sessions = pgTable("sessions", {
-  id: varchar("id").primaryKey(),
-  operatorId: varchar("operator_id").notNull(),
-  token: text("token").notNull(),
-  createdAt: text("created_at").notNull(),
-  expiresAt: text("expires_at").notNull(),
-});
-
-export type Session = typeof sessions.$inferSelect;
