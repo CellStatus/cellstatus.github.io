@@ -81,6 +81,13 @@ export default {
           busy: "rgb(239 68 68)",
           offline: "rgb(156 163 175)",
         },
+        machine: {
+          running: "hsl(var(--machine-running) / <alpha-value>)",
+          idle: "hsl(var(--machine-idle) / <alpha-value>)",
+          maintenance: "hsl(var(--machine-maintenance) / <alpha-value>)",
+          down: "hsl(var(--machine-down) / <alpha-value>)",
+          setup: "hsl(var(--machine-setup) / <alpha-value>)",
+        },
       },
       fontFamily: {
         sans: ["var(--font-sans)"],

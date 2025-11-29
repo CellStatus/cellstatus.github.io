@@ -43,9 +43,14 @@
   --chart-3: 173 58% 39%;
   --chart-4: 43 74% 49%;
   --chart-5: 262 52% 47%;
-  --font-sans: Open Sans, sans-serif;
+  --font-sans: 'IBM Plex Sans', sans-serif;
   --font-serif: Georgia, serif;
-  --font-mono: Menlo, monospace;
+  --font-mono: 'IBM Plex Mono', monospace;
+  --machine-running: 142 76% 36%;
+  --machine-idle: 217 10% 50%;
+  --machine-maintenance: 38 92% 50%;
+  --machine-down: 0 84% 42%;
+  --machine-setup: 262 52% 47%;
   --radius: .5rem;
   --shadow-2xs: 0px 2px 0px 0px hsl(0 0% 0% / 0.00);
   --shadow-xs: 0px 2px 0px 0px hsl(0 0% 0% / 0.00);
@@ -127,6 +132,11 @@
   --chart-3: 173 58% 55%;
   --chart-4: 43 74% 65%;
   --chart-5: 262 52% 65%;
+  --machine-running: 142 76% 45%;
+  --machine-idle: 217 10% 55%;
+  --machine-maintenance: 38 92% 55%;
+  --machine-down: 0 84% 50%;
+  --machine-setup: 262 52% 55%;
   --shadow-2xs: 0px 2px 0px 0px hsl(0 0% 0% / 0.00);
   --shadow-xs: 0px 2px 0px 0px hsl(0 0% 0% / 0.00);
   --shadow-sm: 0px 2px 0px 0px hsl(0 0% 0% / 0.00), 0px 1px 2px -1px hsl(0 0% 0% / 0.00);
