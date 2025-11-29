@@ -63,7 +63,10 @@ export default function LoginPage() {
         title: "Success",
         description: `Welcome, ${operator.name}!`,
       });
-      navigate("/");
+      // Navigate to dashboard - use window.location to trigger full page reload
+      setTimeout(() => {
+        window.location.href = "/";
+      }, 500);
     } catch (error) {
       toast({
         title: "Error",
