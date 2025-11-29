@@ -4,10 +4,16 @@ import {
   type MaintenanceLog, type InsertMaintenanceLog,
   type ProductionStat, type InsertProductionStat,
   type MachineStatus,
+  type User,
+  type UpsertUser,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
 export interface IStorage {
+  // Users (REQUIRED for Replit Auth)
+  getUser(id: string): Promise<User | undefined>;
+  upsertUser(user: UpsertUser): Promise<User>;
+
   // Machines
   getMachines(): Promise<Machine[]>;
   getMachine(id: string): Promise<Machine | undefined>;
@@ -44,15 +50,37 @@ export class MemStorage implements IStorage {
   private operators: Map<string, Operator>;
   private maintenanceLogs: Map<string, MaintenanceLog>;
   private productionStats: Map<string, ProductionStat>;
+  private users: Map<string, User>;
 
   constructor() {
     this.machines = new Map();
     this.operators = new Map();
     this.maintenanceLogs = new Map();
     this.productionStats = new Map();
+    this.users = new Map();
     
     // Add sample data
     this.initializeSampleData();
+  }
+
+  // User operations (REQUIRED for Replit Auth)
+  async getUser(id: string): Promise<User | undefined> {
+    return this.users.get(id);
+  }
+
+  async upsertUser(userData: UpsertUser): Promise<User> {
+    const now = new Date();
+    const user: User = {
+      id: userData.id,
+      email: userData.email ?? null,
+      firstName: userData.firstName ?? null,
+      lastName: userData.lastName ?? null,
+      profileImageUrl: userData.profileImageUrl ?? null,
+      createdAt: this.users.has(userData.id) ? (this.users.get(userData.id)?.createdAt ?? now) : now,
+      updatedAt: now,
+    };
+    this.users.set(userData.id, user);
+    return user;
   }
 
   private initializeSampleData() {

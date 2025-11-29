@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { createSession } from "./auth";
+import { setupAuth, isAuthenticated } from "./replitAuth";
 import { insertMachineSchema, insertOperatorSchema, insertMaintenanceLogSchema, machineStatuses } from "@shared/schema";
 import { z } from "zod";
 
@@ -9,33 +9,23 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // === AUTH ===
-  
-  // Login endpoint
-  app.post("/api/auth/login", async (req, res) => {
+  // Setup Replit Auth
+  await setupAuth(app);
+
+  // === AUTH ROUTES ===
+
+  // Get current user endpoint (protected)
+  app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
     try {
-      const { initials, password } = req.body;
-      
-      if (!initials || !password) {
-        return res.status(400).json({ error: "Initials and password required" });
+      const userId = req.user?.claims?.sub;
+      if (!userId) {
+        return res.status(401).json({ message: "Unauthorized" });
       }
-
-      const operator = await storage.getOperatorByInitials(initials);
-      if (!operator || operator.password !== password) {
-        return res.status(401).json({ error: "Invalid credentials" });
-      }
-
-      const token = createSession(operator.id);
-      res.json({ 
-        token, 
-        operator: { 
-          id: operator.id, 
-          name: operator.name, 
-          initials: operator.initials 
-        } 
-      });
+      const user = await storage.getUser(userId);
+      res.json(user);
     } catch (error) {
-      res.status(500).json({ error: "Login failed" });
+      console.error("Error fetching user:", error);
+      res.status(500).json({ message: "Failed to fetch user" });
     }
   });
 
