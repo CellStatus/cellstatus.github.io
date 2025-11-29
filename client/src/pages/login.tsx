@@ -18,7 +18,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from "lucide-react";
 
 const loginSchema = z.object({
-  initials: z.string().min(1, "Initials required").toUpperCase(),
+  initials: z.string().min(1, "Initials required"),
   password: z.string().min(1, "Password required"),
 });
 

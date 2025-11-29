@@ -272,7 +272,7 @@ export class MemStorage implements IStorage {
     const now = new Date().toISOString();
     const updatedMachine: Machine = { 
       ...machine, 
-      status,
+      status: status as MachineStatus,
       lastUpdated: "Just now",
       updatedAt: now,
       updatedBy: operatorId ?? null
@@ -388,7 +388,6 @@ export class MemStorage implements IStorage {
     if (log.status === "in-progress") {
       const machine = this.machines.get(log.machineId);
       if (machine) {
-        const now = new Date().toISOString();
         this.machines.set(log.machineId, { 
           ...machine, 
           status: "maintenance" as MachineStatus,
