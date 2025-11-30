@@ -13,6 +13,7 @@ import Dashboard from "@/pages/dashboard";
 import MachinesPage from "@/pages/machines";
 import OperatorsPage from "@/pages/operators";
 import MaintenancePage from "@/pages/maintenance";
+import ReportsPage from "@/pages/reports";
 import Landing from "@/pages/landing";
 import NotFound from "@/pages/not-found";
 
@@ -71,6 +72,7 @@ function AppContent() {
               <Route path="/machines" component={MachinesPage} />
               <Route path="/operators" component={OperatorsPage} />
               <Route path="/maintenance" component={MaintenancePage} />
+              <Route path="/reports" component={ReportsPage} />
               <Route component={NotFound} />
             </Switch>
           </main>

@@ -320,5 +320,87 @@ export async function registerRoutes(
     }
   });
 
+  // === REPORTS ===
+
+  // Get efficiency box plot data grouped by machine and operator
+  app.get("/api/reports/efficiency", async (_req, res) => {
+    try {
+      const stats = await storage.getProductionStats();
+      const machines = await storage.getMachines();
+      const operators = await storage.getOperators();
+
+      // Create lookup maps
+      const machineMap = new Map(machines.map(m => [m.id, m]));
+      const operatorMap = new Map(operators.map(o => [o.id, o]));
+
+      // Group stats by machineId and createdBy (operator)
+      type GroupKey = string;
+      const groups = new Map<GroupKey, number[]>();
+
+      for (const stat of stats) {
+        if (stat.efficiency !== null && stat.efficiency !== undefined) {
+          const key = `${stat.machineId}|${stat.createdBy || "unknown"}`;
+          if (!groups.has(key)) {
+            groups.set(key, []);
+          }
+          groups.get(key)!.push(stat.efficiency);
+        }
+      }
+
+      // Calculate quartiles and other statistics
+      const calculateStats = (values: number[]) => {
+        const sorted = [...values].sort((a, b) => a - b);
+        const n = sorted.length;
+        const min = sorted[0];
+        const max = sorted[n - 1];
+        const mean = values.reduce((a, b) => a + b, 0) / n;
+
+        // Calculate median
+        const median = n % 2 === 0
+          ? (sorted[n / 2 - 1] + sorted[n / 2]) / 2
+          : sorted[Math.floor(n / 2)];
+
+        // Calculate Q1 (25th percentile)
+        const q1Index = (n - 1) * 0.25;
+        const q1 = sorted[Math.floor(q1Index)] +
+          (q1Index % 1) * (sorted[Math.ceil(q1Index)] - sorted[Math.floor(q1Index)]);
+
+        // Calculate Q3 (75th percentile)
+        const q3Index = (n - 1) * 0.75;
+        const q3 = sorted[Math.floor(q3Index)] +
+          (q3Index % 1) * (sorted[Math.ceil(q3Index)] - sorted[Math.floor(q3Index)]);
+
+        return { min, q1, median, q3, max, mean };
+      };
+
+      // Build report data
+      const reportData = Array.from(groups.entries()).map(([key, values]) => {
+        const [machineId, operatorId] = key.split("|");
+        const machine = machineMap.get(machineId);
+        const operator = operatorMap.get(operatorId);
+        const stats = calculateStats(values);
+
+        return {
+          machineId,
+          machineName: machine?.name || "Unknown Machine",
+          operatorId,
+          operatorName: operator?.name || (operatorId === "unknown" ? "Unassigned" : "Unknown"),
+          count: values.length,
+          ...stats,
+        };
+      }).sort((a, b) => {
+        if (a.machineName !== b.machineName) {
+          return a.machineName.localeCompare(b.machineName);
+        }
+        return a.operatorName.localeCompare(b.operatorName);
+      });
+
+      res.json({ data: reportData });
+    } catch (error) {
+      console.error("Failed to generate efficiency report:", error);
+      res.status(500).json({ error: "Failed to generate efficiency report" });
+    }
+  });
+
   return httpServer;
 }

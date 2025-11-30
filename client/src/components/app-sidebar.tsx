@@ -5,6 +5,7 @@ import {
   Users,
   Settings,
   Factory,
+  BarChart3,
 } from "lucide-react";
 import {
   Sidebar,
@@ -39,6 +40,11 @@ const navItems = [
     title: "Maintenance",
     url: "/maintenance",
     icon: Wrench,
+  },
+  {
+    title: "Reports",
+    url: "/reports",
+    icon: BarChart3,
   },
 ];
 
