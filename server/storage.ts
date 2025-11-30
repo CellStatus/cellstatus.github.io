@@ -6,8 +6,11 @@ import {
   type MachineStatus,
   type User,
   type UpsertUser,
+  machines, operators, maintenanceLogs, productionStats, users,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
+import { db } from "./db";
+import { eq, and } from "drizzle-orm";
 
 export interface IStorage {
   // Users (REQUIRED for Replit Auth)
@@ -45,362 +48,232 @@ export interface IStorage {
   createProductionStat(stat: InsertProductionStat, operatorId?: string): Promise<ProductionStat>;
 }
 
-export class MemStorage implements IStorage {
-  private machines: Map<string, Machine>;
-  private operators: Map<string, Operator>;
-  private maintenanceLogs: Map<string, MaintenanceLog>;
-  private productionStats: Map<string, ProductionStat>;
-  private users: Map<string, User>;
-
-  constructor() {
-    this.machines = new Map();
-    this.operators = new Map();
-    this.maintenanceLogs = new Map();
-    this.productionStats = new Map();
-    this.users = new Map();
-    
-    // Add sample data
-    this.initializeSampleData();
-  }
-
+export class DatabaseStorage implements IStorage {
   // User operations (REQUIRED for Replit Auth)
   async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+    const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
+    return result[0];
   }
 
   async upsertUser(userData: UpsertUser): Promise<User> {
     const now = new Date();
-    const user: User = {
-      id: userData.id,
-      email: userData.email ?? null,
-      firstName: userData.firstName ?? null,
-      lastName: userData.lastName ?? null,
-      profileImageUrl: userData.profileImageUrl ?? null,
-      createdAt: this.users.has(userData.id) ? (this.users.get(userData.id)?.createdAt ?? now) : now,
-      updatedAt: now,
-    };
-    this.users.set(userData.id, user);
-    return user;
-  }
-
-  private initializeSampleData() {
-    const now = new Date().toISOString();
+    const existing = await this.getUser(userData.id);
     
-    // Sample operators
-    const operators: Operator[] = [
-      { id: "op-1", name: "John Smith", initials: "JS", shift: "Day", password: "123456", createdAt: now, updatedAt: now },
-      { id: "op-2", name: "Maria Garcia", initials: "MG", shift: "Day", password: "123456", createdAt: now, updatedAt: now },
-      { id: "op-3", name: "Mike Johnson", initials: "MJ", shift: "Swing", password: "123456", createdAt: now, updatedAt: now },
-      { id: "op-4", name: "Sarah Chen", initials: "SC", shift: "Night", password: "123456", createdAt: now, updatedAt: now },
-    ];
-    operators.forEach(op => this.operators.set(op.id, op));
-
-    // Sample machines
-    const machines: Machine[] = [
-      { 
-        id: "m-1", 
-        name: "CNC Mill #1", 
-        machineId: "M-001", 
-        status: "running", 
-        operatorId: "op-1",
-        unitsProduced: 85,
-        targetUnits: 100,
-        cycleTime: 45.2,
-        efficiency: 92,
-        lastUpdated: "2 min ago",
+    if (existing) {
+      await db.update(users)
+        .set({
+          email: userData.email ?? existing.email,
+          firstName: userData.firstName ?? existing.firstName,
+          lastName: userData.lastName ?? existing.lastName,
+          profileImageUrl: userData.profileImageUrl ?? existing.profileImageUrl,
+          updatedAt: now,
+        })
+        .where(eq(users.id, userData.id));
+      
+      const updated = await this.getUser(userData.id);
+      return updated!;
+    } else {
+      await db.insert(users).values({
+        id: userData.id,
+        email: userData.email ?? null,
+        firstName: userData.firstName ?? null,
+        lastName: userData.lastName ?? null,
+        profileImageUrl: userData.profileImageUrl ?? null,
         createdAt: now,
         updatedAt: now,
-        createdBy: "op-1",
-        updatedBy: "op-1"
-      },
-      { 
-        id: "m-2", 
-        name: "CNC Mill #2", 
-        machineId: "M-002", 
-        status: "running", 
-        operatorId: "op-2",
-        unitsProduced: 72,
-        targetUnits: 100,
-        cycleTime: 48.5,
-        efficiency: 88,
-        lastUpdated: "5 min ago",
-        createdAt: now,
-        updatedAt: now,
-        createdBy: "op-2",
-        updatedBy: "op-2"
-      },
-      { 
-        id: "m-3", 
-        name: "Lathe #1", 
-        machineId: "L-001", 
-        status: "idle", 
-        operatorId: null,
-        unitsProduced: 45,
-        targetUnits: 80,
-        cycleTime: 32.1,
-        efficiency: 75,
-        lastUpdated: "15 min ago",
-        createdAt: now,
-        updatedAt: now,
-        createdBy: "op-3",
-        updatedBy: null
-      },
-      { 
-        id: "m-4", 
-        name: "Press #1", 
-        machineId: "P-001", 
-        status: "maintenance", 
-        operatorId: null,
-        unitsProduced: 0,
-        targetUnits: 150,
-        cycleTime: null,
-        efficiency: null,
-        lastUpdated: "1 hour ago",
-        createdAt: now,
-        updatedAt: now,
-        createdBy: "op-4",
-        updatedBy: null
-      },
-      { 
-        id: "m-5", 
-        name: "Welder #1", 
-        machineId: "W-001", 
-        status: "running", 
-        operatorId: "op-3",
-        unitsProduced: 120,
-        targetUnits: 100,
-        cycleTime: 28.7,
-        efficiency: 95,
-        lastUpdated: "1 min ago",
-        createdAt: now,
-        updatedAt: now,
-        createdBy: "op-3",
-        updatedBy: "op-3"
-      },
-      { 
-        id: "m-6", 
-        name: "Assembly Station", 
-        machineId: "A-001", 
-        status: "setup", 
-        operatorId: "op-4",
-        unitsProduced: 0,
-        targetUnits: 50,
-        cycleTime: null,
-        efficiency: null,
-        lastUpdated: "30 min ago",
-        createdAt: now,
-        updatedAt: now,
-        createdBy: "op-4",
-        updatedBy: "op-4"
-      },
-    ];
-    machines.forEach(m => this.machines.set(m.id, m));
-
-    // Sample maintenance logs
-    const maintenanceLogs: MaintenanceLog[] = [
-      {
-        id: "ml-1",
-        machineId: "m-4",
-        type: "corrective",
-        description: "Hydraulic system leak repair",
-        status: "in-progress",
-        scheduledDate: "2024-01-15",
-        completedDate: null,
-        technician: "Bob Wilson",
-        notes: "Waiting for replacement seals",
-        createdAt: now,
-        updatedAt: now,
-        createdBy: "op-1",
-        updatedBy: null
-      },
-      {
-        id: "ml-2",
-        machineId: "m-1",
-        type: "preventive",
-        description: "Monthly spindle inspection",
-        status: "scheduled",
-        scheduledDate: "2024-01-20",
-        completedDate: null,
-        technician: "Tom Davis",
-        notes: null,
-        createdAt: now,
-        updatedAt: now,
-        createdBy: "op-2",
-        updatedBy: null
-      },
-      {
-        id: "ml-3",
-        machineId: "m-2",
-        type: "inspection",
-        description: "Tool wear assessment",
-        status: "completed",
-        scheduledDate: "2024-01-10",
-        completedDate: "2024-01-10",
-        technician: "Tom Davis",
-        notes: "All tools within tolerance",
-        createdAt: now,
-        updatedAt: now,
-        createdBy: "op-3",
-        updatedBy: "op-3"
-      },
-    ];
-    maintenanceLogs.forEach(ml => this.maintenanceLogs.set(ml.id, ml));
+      });
+      
+      return (await this.getUser(userData.id))!;
+    }
   }
 
   // Machines
   async getMachines(): Promise<Machine[]> {
-    return Array.from(this.machines.values());
+    return await db.select().from(machines);
   }
 
   async getMachine(id: string): Promise<Machine | undefined> {
-    return this.machines.get(id);
+    const result = await db.select().from(machines).where(eq(machines.id, id)).limit(1);
+    return result[0];
   }
 
   async createMachine(machine: InsertMachine, operatorId?: string): Promise<Machine> {
     const id = randomUUID();
     const now = new Date().toISOString();
-    const newMachine: Machine = { 
-      ...machine, 
+    
+    const newMachine = {
       id,
+      name: machine.name,
+      machineId: machine.machineId,
+      status: machine.status,
+      operatorId: machine.operatorId ?? null,
       unitsProduced: machine.unitsProduced ?? 0,
       targetUnits: machine.targetUnits ?? 100,
       cycleTime: machine.cycleTime ?? null,
       efficiency: machine.efficiency ?? null,
-      operatorId: machine.operatorId ?? null,
       lastUpdated: `Created at ${now}`,
       createdAt: now,
       updatedAt: now,
       createdBy: operatorId ?? null,
-      updatedBy: null
+      updatedBy: null,
     };
-    this.machines.set(id, newMachine);
-    return newMachine;
+
+    await db.insert(machines).values(newMachine);
+    return (await this.getMachine(id))!;
   }
 
   async updateMachine(id: string, updates: Partial<InsertMachine>, operatorId?: string): Promise<Machine | undefined> {
-    const machine = this.machines.get(id);
+    const machine = await this.getMachine(id);
     if (!machine) return undefined;
-    
+
     const now = new Date().toISOString();
-    const updatedMachine: Machine = { 
-      ...machine, 
-      ...updates,
-      lastUpdated: `Updated at ${now}`,
-      updatedAt: now,
-      updatedBy: operatorId ?? null
-    };
-    this.machines.set(id, updatedMachine);
-    return updatedMachine;
+    await db.update(machines)
+      .set({
+        name: updates.name ?? machine.name,
+        machineId: updates.machineId ?? machine.machineId,
+        status: updates.status ?? machine.status,
+        operatorId: updates.operatorId !== undefined ? updates.operatorId : machine.operatorId,
+        unitsProduced: updates.unitsProduced ?? machine.unitsProduced,
+        targetUnits: updates.targetUnits ?? machine.targetUnits,
+        cycleTime: updates.cycleTime ?? machine.cycleTime,
+        efficiency: updates.efficiency ?? machine.efficiency,
+        lastUpdated: `Updated at ${now}`,
+        updatedAt: now,
+        updatedBy: operatorId ?? null,
+      })
+      .where(eq(machines.id, id));
+
+    return (await this.getMachine(id))!;
   }
 
   async updateMachineStatus(id: string, status: MachineStatus, operatorId?: string): Promise<Machine | undefined> {
-    const machine = this.machines.get(id);
+    const machine = await this.getMachine(id);
     if (!machine) return undefined;
-    
+
     const now = new Date().toISOString();
-    const updatedMachine: Machine = { 
-      ...machine, 
-      status: status as MachineStatus,
-      lastUpdated: "Just now",
-      updatedAt: now,
-      updatedBy: operatorId ?? null
-    };
-    this.machines.set(id, updatedMachine);
-    return updatedMachine;
+    await db.update(machines)
+      .set({
+        status,
+        lastUpdated: "Just now",
+        updatedAt: now,
+        updatedBy: operatorId ?? null,
+      })
+      .where(eq(machines.id, id));
+
+    return (await this.getMachine(id))!;
   }
 
   async updateMachineOperator(id: string, operatorId: string | null): Promise<Machine | undefined> {
-    const machine = this.machines.get(id);
+    const machine = await this.getMachine(id);
     if (!machine) return undefined;
-    
+
     const now = new Date().toISOString();
-    const updatedMachine: Machine = { 
-      ...machine, 
-      operatorId,
-      lastUpdated: "Just now",
-      updatedAt: now,
-      updatedBy: operatorId ?? null
-    };
-    this.machines.set(id, updatedMachine);
-    return updatedMachine;
+    await db.update(machines)
+      .set({
+        operatorId,
+        lastUpdated: "Just now",
+        updatedAt: now,
+        updatedBy: operatorId ?? null,
+      })
+      .where(eq(machines.id, id));
+
+    return (await this.getMachine(id))!;
   }
 
   async deleteMachine(id: string): Promise<boolean> {
-    return this.machines.delete(id);
+    const result = await db.delete(machines).where(eq(machines.id, id));
+    return true;
   }
 
   // Operators
   async getOperators(): Promise<Operator[]> {
-    return Array.from(this.operators.values());
+    return await db.select().from(operators);
   }
 
   async getOperator(id: string): Promise<Operator | undefined> {
-    return this.operators.get(id);
+    const result = await db.select().from(operators).where(eq(operators.id, id)).limit(1);
+    return result[0];
   }
 
   async getOperatorByInitials(initials: string): Promise<Operator | undefined> {
-    return Array.from(this.operators.values()).find(op => op.initials.toUpperCase() === initials.toUpperCase());
+    const result = await db.select().from(operators).limit(100);
+    return result.find(op => op.initials.toUpperCase() === initials.toUpperCase());
   }
 
   async createOperator(operator: InsertOperator): Promise<Operator> {
     const id = randomUUID();
     const now = new Date().toISOString();
-    const newOperator: Operator = { 
-      ...operator, 
+
+    await db.insert(operators).values({
       id,
+      name: operator.name,
+      initials: operator.initials,
+      shift: operator.shift,
       password: operator.password ?? "",
       createdAt: now,
-      updatedAt: now
-    };
-    this.operators.set(id, newOperator);
-    return newOperator;
+      updatedAt: now,
+    });
+
+    return (await this.getOperator(id))!;
   }
 
   async updateOperator(id: string, updates: Partial<InsertOperator>): Promise<Operator | undefined> {
-    const operator = this.operators.get(id);
+    const operator = await this.getOperator(id);
     if (!operator) return undefined;
-    
+
     const now = new Date().toISOString();
-    const updatedOperator: Operator = { 
-      ...operator, 
-      ...updates,
-      updatedAt: now
-    };
-    this.operators.set(id, updatedOperator);
-    return updatedOperator;
+    await db.update(operators)
+      .set({
+        name: updates.name ?? operator.name,
+        initials: updates.initials ?? operator.initials,
+        shift: updates.shift ?? operator.shift,
+        password: updates.password ?? operator.password,
+        updatedAt: now,
+      })
+      .where(eq(operators.id, id));
+
+    return (await this.getOperator(id))!;
   }
 
   async deleteOperator(id: string): Promise<boolean> {
     // Unassign this operator from any machines
-    for (const [machineId, machine] of this.machines) {
+    const allMachines = await this.getMachines();
+    for (const machine of allMachines) {
       if (machine.operatorId === id) {
-        this.machines.set(machineId, { ...machine, operatorId: null });
+        await db.update(machines)
+          .set({ operatorId: null })
+          .where(eq(machines.id, machine.id));
       }
     }
-    return this.operators.delete(id);
+
+    await db.delete(operators).where(eq(operators.id, id));
+    return true;
   }
 
   // Maintenance Logs
   async getMaintenanceLogs(): Promise<MaintenanceLog[]> {
-    return Array.from(this.maintenanceLogs.values());
+    return await db.select().from(maintenanceLogs);
   }
 
   async getMaintenanceLog(id: string): Promise<MaintenanceLog | undefined> {
-    return this.maintenanceLogs.get(id);
+    const result = await db.select().from(maintenanceLogs).where(eq(maintenanceLogs.id, id)).limit(1);
+    return result[0];
   }
 
   async getMaintenanceLogsByMachine(machineId: string): Promise<MaintenanceLog[]> {
-    return Array.from(this.maintenanceLogs.values()).filter(
-      log => log.machineId === machineId
-    );
+    return await db.select().from(maintenanceLogs).where(eq(maintenanceLogs.machineId, machineId));
   }
 
   async createMaintenanceLog(log: InsertMaintenanceLog, operatorId?: string): Promise<MaintenanceLog> {
     const id = randomUUID();
     const now = new Date().toISOString();
-    const newLog: MaintenanceLog = { 
-      ...log, 
+
+    await db.insert(maintenanceLogs).values({
       id,
+      machineId: log.machineId,
+      type: log.type,
+      description: log.description,
+      status: log.status,
       scheduledDate: log.scheduledDate ?? null,
       completedDate: log.completedDate ?? null,
       technician: log.technician ?? null,
@@ -408,70 +281,76 @@ export class MemStorage implements IStorage {
       createdAt: now,
       updatedAt: now,
       createdBy: operatorId ?? null,
-      updatedBy: null
-    };
-    this.maintenanceLogs.set(id, newLog);
-    
-    // If maintenance is being logged, update machine status
+      updatedBy: null,
+    });
+
+    // If maintenance is in-progress, update machine status
     if (log.status === "in-progress") {
-      const machine = this.machines.get(log.machineId);
+      const machine = await this.getMachine(log.machineId);
       if (machine) {
-        this.machines.set(log.machineId, { 
-          ...machine, 
-          status: "maintenance" as MachineStatus,
-          updatedAt: now,
-          updatedBy: operatorId ?? null
-        });
+        await this.updateMachineStatus(log.machineId, "maintenance", operatorId);
       }
     }
-    
-    return newLog;
+
+    return (await this.getMaintenanceLog(id))!;
   }
 
   async updateMaintenanceLog(id: string, updates: Partial<InsertMaintenanceLog>, operatorId?: string): Promise<MaintenanceLog | undefined> {
-    const log = this.maintenanceLogs.get(id);
+    const log = await this.getMaintenanceLog(id);
     if (!log) return undefined;
-    
+
     const now = new Date().toISOString();
-    const updatedLog: MaintenanceLog = { 
-      ...log, 
-      ...updates,
-      updatedAt: now,
-      updatedBy: operatorId ?? null
-    };
-    this.maintenanceLogs.set(id, updatedLog);
-    return updatedLog;
+    await db.update(maintenanceLogs)
+      .set({
+        machineId: updates.machineId ?? log.machineId,
+        type: updates.type ?? log.type,
+        description: updates.description ?? log.description,
+        status: updates.status ?? log.status,
+        scheduledDate: updates.scheduledDate ?? log.scheduledDate,
+        completedDate: updates.completedDate ?? log.completedDate,
+        technician: updates.technician ?? log.technician,
+        notes: updates.notes ?? log.notes,
+        updatedAt: now,
+        updatedBy: operatorId ?? null,
+      })
+      .where(eq(maintenanceLogs.id, id));
+
+    return (await this.getMaintenanceLog(id))!;
   }
 
   async deleteMaintenanceLog(id: string): Promise<boolean> {
-    return this.maintenanceLogs.delete(id);
+    await db.delete(maintenanceLogs).where(eq(maintenanceLogs.id, id));
+    return true;
   }
 
   // Production Stats
   async getProductionStats(): Promise<ProductionStat[]> {
-    return Array.from(this.productionStats.values());
+    return await db.select().from(productionStats);
   }
 
   async getProductionStatsByMachine(machineId: string): Promise<ProductionStat[]> {
-    return Array.from(this.productionStats.values()).filter(
-      stat => stat.machineId === machineId
-    );
+    return await db.select().from(productionStats).where(eq(productionStats.machineId, machineId));
   }
 
   async createProductionStat(stat: InsertProductionStat, operatorId?: string): Promise<ProductionStat> {
     const id = randomUUID();
     const now = new Date().toISOString();
-    const newStat: ProductionStat = { 
-      ...stat, 
+
+    await db.insert(productionStats).values({
       id,
+      machineId: stat.machineId,
+      shift: stat.shift,
+      date: stat.date,
+      unitsProduced: stat.unitsProduced,
+      targetUnits: stat.targetUnits,
       downtime: stat.downtime ?? 0,
       efficiency: stat.efficiency ?? null,
       createdAt: now,
-      createdBy: operatorId ?? null
-    };
-    this.productionStats.set(id, newStat);
-    return newStat;
+      createdBy: operatorId ?? null,
+    });
+
+    return (await db.select().from(productionStats).where(eq(productionStats.id, id)).limit(1))[0]!;
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();
