@@ -353,47 +353,4 @@ export class DatabaseStorage implements IStorage {
   }
 }
 
-// Seed sample production stats for reports
-async function seedProductionStats(storage: DatabaseStorage) {
-  try {
-    const stats = await storage.getProductionStats();
-    if (stats.length === 0) {
-      // Add sample production stats for different machines
-      const machines = await storage.getMachines();
-      const operators = await storage.getOperators();
-      
-      if (machines.length > 0 && operators.length > 0) {
-        const machineIds = machines.slice(0, 2).map(m => m.id);
-        const operatorIds = operators.slice(0, 2).map(o => o.id);
-        
-        // Generate 20 sample stats per machine-operator pair
-        for (const machineId of machineIds) {
-          for (const operatorId of operatorIds) {
-            for (let i = 0; i < 20; i++) {
-              const efficiency = 75 + Math.random() * 20; // 75-95%
-              await storage.createProductionStat(
-                {
-                  machineId,
-                  shift: i % 3 === 0 ? "Day" : i % 3 === 1 ? "Swing" : "Night",
-                  date: new Date(Date.now() - i * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-                  unitsProduced: 80 + Math.floor(Math.random() * 40),
-                  targetUnits: 100,
-                  downtime: Math.floor(Math.random() * 30),
-                  efficiency,
-                },
-                operatorId
-              );
-            }
-          }
-        }
-      }
-    }
-  } catch (error) {
-    console.error("Failed to seed production stats:", error);
-  }
-}
-
 export const storage = new DatabaseStorage();
-
-// Seed data on startup
-seedProductionStats(storage);

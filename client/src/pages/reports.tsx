@@ -178,49 +178,6 @@ export default function Reports() {
 
             <Card className="flex-shrink-0">
               <CardHeader className="pb-3">
-                <CardTitle className="text-lg">Summary Statistics</CardTitle>
-                <CardDescription className="text-xs">
-                  Efficiency metrics for each machine-operator pair
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="overflow-x-auto max-h-64">
-                  <table className="w-full text-xs">
-                    <thead className="border-b sticky top-0 bg-background">
-                      <tr>
-                        <th className="text-left py-1 px-1">Machine</th>
-                        <th className="text-left py-1 px-1">Operator</th>
-                        <th className="text-right py-1 px-1">Min</th>
-                        <th className="text-right py-1 px-1">Q1</th>
-                        <th className="text-right py-1 px-1">Med</th>
-                        <th className="text-right py-1 px-1">Q3</th>
-                        <th className="text-right py-1 px-1">Max</th>
-                        <th className="text-right py-1 px-1">Avg</th>
-                        <th className="text-right py-1 px-1">N</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {reportData?.data?.map((item) => (
-                        <tr key={`${item.machineId}-${item.operatorId}`} className="border-b hover:bg-muted/50">
-                          <td className="py-1 px-1 truncate">{item.machineName}</td>
-                          <td className="py-1 px-1 truncate">{item.operatorName || "Unknown"}</td>
-                          <td className="text-right py-1 px-1 text-xs tabular-nums">{item.min.toFixed(1)}%</td>
-                          <td className="text-right py-1 px-1 text-xs tabular-nums">{item.q1.toFixed(1)}%</td>
-                          <td className="text-right py-1 px-1 text-xs tabular-nums font-semibold">{item.median.toFixed(1)}%</td>
-                          <td className="text-right py-1 px-1 text-xs tabular-nums">{item.q3.toFixed(1)}%</td>
-                          <td className="text-right py-1 px-1 text-xs tabular-nums">{item.max.toFixed(1)}%</td>
-                          <td className="text-right py-1 px-1 text-xs tabular-nums">{item.mean.toFixed(1)}%</td>
-                          <td className="text-right py-1 px-1">{item.count}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="flex-shrink-0">
-              <CardHeader className="pb-3">
                 <CardTitle className="text-lg">Machine Logs</CardTitle>
                 <CardDescription className="text-xs">
                   Summary of each machine and its production statistics
