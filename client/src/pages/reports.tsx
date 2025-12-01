@@ -1,23 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FileDown } from "lucide-react";
-
-interface BoxPlotData {
-  machineId: string;
-  machineName: string;
-  operatorId: string;
-  operatorName: string;
-  min: number;
-  q1: number;
-  median: number;
-  q3: number;
-  max: number;
-  mean: number;
-  count: number;
-}
 
 interface MachineLog {
   machineId: string;
@@ -43,7 +29,7 @@ interface JobSetterActivity {
 }
 
 interface ReportResponse {
-  data: BoxPlotData[];
+  data: any[];
   machineLogs: MachineLog[];
   jobSetterActivities: JobSetterActivity[];
 }
