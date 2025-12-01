@@ -31,11 +31,7 @@ export default function Dashboard() {
   const [maintenanceMachineId, setMaintenanceMachineId] = useState<string | undefined>();
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
   const [assigningMachine, setAssigningMachine] = useState<Machine | null>(null);
-  const getAutoShift = () => {
-    const hour = new Date().getHours();
-    return hour >= 6 && hour < 14 ? "Day" : hour >= 14 && hour < 22 ? "Afternoon" : "Midnight";
-  };
-  const [selectedShift, setSelectedShift] = useState<string>(getAutoShift());
+  const [selectedShift, setSelectedShift] = useState<string>("Day");
 
   const { data: machines = [], isLoading: machinesLoading } = useQuery<Machine[]>({
     queryKey: ["/api/machines"],
