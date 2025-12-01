@@ -20,8 +20,33 @@ interface BoxPlotData {
   count: number;
 }
 
+interface MachineLog {
+  machineId: string;
+  machineName: string;
+  status: string;
+  operatorName: string;
+  statsCount: number;
+  totalUnitsProduced: number;
+  avgEfficiency: string;
+  createdAt: string;
+  createdBy: string;
+  lastUpdated: string;
+  lastUpdatedBy: string;
+}
+
+interface JobSetterActivity {
+  operatorName: string;
+  operatorId: string;
+  type: string;
+  target: string;
+  timestamp: string;
+  details: string;
+}
+
 interface ReportResponse {
   data: BoxPlotData[];
+  machineLogs: MachineLog[];
+  jobSetterActivities: JobSetterActivity[];
 }
 
 export default function Reports() {
@@ -159,7 +184,7 @@ export default function Reports() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="overflow-x-auto max-h-96">
+                <div className="overflow-x-auto max-h-64">
                   <table className="w-full text-xs">
                     <thead className="border-b sticky top-0 bg-background">
                       <tr>
@@ -190,6 +215,76 @@ export default function Reports() {
                       ))}
                     </tbody>
                   </table>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="flex-shrink-0">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg">Machine Logs</CardTitle>
+                <CardDescription className="text-xs">
+                  Summary of each machine and its production statistics
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto max-h-64">
+                  <table className="w-full text-xs">
+                    <thead className="border-b sticky top-0 bg-background">
+                      <tr>
+                        <th className="text-left py-1 px-1">Machine</th>
+                        <th className="text-left py-1 px-1">Status</th>
+                        <th className="text-left py-1 px-1">Operator</th>
+                        <th className="text-right py-1 px-1">Units</th>
+                        <th className="text-right py-1 px-1">Eff%</th>
+                        <th className="text-left py-1 px-1">Created By</th>
+                        <th className="text-left py-1 px-1">Last Updated By</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reportData?.machineLogs?.map((log) => (
+                        <tr key={log.machineId} className="border-b hover:bg-muted/50">
+                          <td className="py-1 px-1 truncate font-medium">{log.machineName}</td>
+                          <td className="py-1 px-1 capitalize text-xs">{log.status}</td>
+                          <td className="py-1 px-1 truncate">{log.operatorName}</td>
+                          <td className="text-right py-1 px-1 tabular-nums">{log.totalUnitsProduced}</td>
+                          <td className="text-right py-1 px-1 tabular-nums">{log.avgEfficiency}%</td>
+                          <td className="py-1 px-1 truncate text-xs">{log.createdBy}</td>
+                          <td className="py-1 px-1 truncate text-xs">{log.lastUpdatedBy}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="flex-shrink-0">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg">Job Setter Activities</CardTitle>
+                <CardDescription className="text-xs">
+                  Recent operator/job setter activities and updates
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {reportData?.jobSetterActivities && reportData.jobSetterActivities.length > 0 ? (
+                    reportData.jobSetterActivities.slice(0, 30).map((activity, idx) => (
+                      <div key={idx} className="text-xs pb-2 border-b last:border-b-0">
+                        <div className="flex items-start gap-2">
+                          <div className="flex-1">
+                            <div className="font-medium">{activity.operatorName}</div>
+                            <div className="text-muted-foreground">{activity.type} - {activity.target}</div>
+                            <div className="text-xs">{activity.details}</div>
+                          </div>
+                          <div className="text-xs text-muted-foreground whitespace-nowrap">
+                            {new Date(activity.timestamp).toLocaleDateString()}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-muted-foreground text-xs">No activities recorded</p>
+                  )}
                 </div>
               </CardContent>
             </Card>

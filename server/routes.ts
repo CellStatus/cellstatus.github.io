@@ -328,6 +328,7 @@ export async function registerRoutes(
       const stats = await storage.getProductionStats();
       const machines = await storage.getMachines();
       const operators = await storage.getOperators();
+      const maintenanceLogs = await storage.getMaintenanceLogs();
 
       // Create lookup maps
       const machineMap = new Map(machines.map(m => [m.id, m]));
@@ -378,7 +379,7 @@ export async function registerRoutes(
         const [machineId, operatorId] = key.split("|");
         const machine = machineMap.get(machineId);
         const operator = operatorMap.get(operatorId);
-        const stats = calculateStats(values);
+        const statsCalc = calculateStats(values);
 
         return {
           machineId,
@@ -386,7 +387,7 @@ export async function registerRoutes(
           operatorId,
           operatorName: operator?.name || (operatorId === "unknown" ? "Unassigned" : "Unknown"),
           count: values.length,
-          ...stats,
+          ...statsCalc,
         };
       }).sort((a, b) => {
         if (a.machineName !== b.machineName) {
@@ -395,7 +396,91 @@ export async function registerRoutes(
         return a.operatorName.localeCompare(b.operatorName);
       });
 
-      res.json({ data: reportData });
+      // Build machine logs with stats
+      const machineLogs = machines.map(machine => {
+        const machineStats = stats.filter(s => s.machineId === machine.id);
+        const avgEfficiency = machineStats.length > 0 
+          ? machineStats.reduce((sum, s) => sum + (s.efficiency || 0), 0) / machineStats.length 
+          : 0;
+        const totalUnits = machineStats.reduce((sum, s) => sum + s.unitsProduced, 0);
+        
+        return {
+          machineId: machine.id,
+          machineName: machine.name,
+          status: machine.status,
+          operatorName: machine.operatorId ? operatorMap.get(machine.operatorId)?.name : "Unassigned",
+          statsCount: machineStats.length,
+          totalUnitsProduced: totalUnits,
+          avgEfficiency: avgEfficiency.toFixed(1),
+          createdAt: machine.createdAt,
+          createdBy: machine.createdBy ? operatorMap.get(machine.createdBy)?.name : "System",
+          lastUpdated: machine.updatedAt,
+          lastUpdatedBy: machine.updatedBy ? operatorMap.get(machine.updatedBy)?.name : "System",
+        };
+      });
+
+      // Build job setter activities (operator activities from all tables)
+      const activities = new Map<string, any[]>();
+      
+      machines.forEach(m => {
+        if (m.createdBy) {
+          if (!activities.has(m.createdBy)) activities.set(m.createdBy, []);
+          activities.get(m.createdBy)!.push({
+            type: "Created Machine",
+            target: m.name,
+            timestamp: m.createdAt,
+            details: `Machine "${m.name}" was created`
+          });
+        }
+        if (m.updatedBy) {
+          if (!activities.has(m.updatedBy)) activities.set(m.updatedBy, []);
+          activities.get(m.updatedBy)!.push({
+            type: "Updated Machine",
+            target: m.name,
+            timestamp: m.updatedAt,
+            details: `Machine "${m.name}" was updated (Status: ${m.status})`
+          });
+        }
+      });
+
+      stats.forEach(s => {
+        if (s.createdBy) {
+          if (!activities.has(s.createdBy)) activities.set(s.createdBy, []);
+          activities.get(s.createdBy)!.push({
+            type: "Recorded Production",
+            target: machineMap.get(s.machineId)?.name || "Unknown",
+            timestamp: s.createdAt,
+            details: `${s.unitsProduced} units produced (Efficiency: ${s.efficiency?.toFixed(1)}%)`
+          });
+        }
+      });
+
+      maintenanceLogs.forEach(log => {
+        if (log.createdBy) {
+          if (!activities.has(log.createdBy)) activities.set(log.createdBy, []);
+          activities.get(log.createdBy)!.push({
+            type: "Maintenance Activity",
+            target: machineMap.get(log.machineId)?.name || "Unknown",
+            timestamp: log.createdAt,
+            details: `${log.type} - ${log.description}`
+          });
+        }
+      });
+
+      const jobSetterActivities = Array.from(activities.entries()).flatMap(([operatorId, ops]) => {
+        const operator = operatorMap.get(operatorId);
+        return ops.map(activity => ({
+          operatorName: operator?.name || "Unknown",
+          operatorId,
+          ...activity
+        }));
+      }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+      res.json({ 
+        data: reportData,
+        machineLogs,
+        jobSetterActivities
+      });
     } catch (error) {
       console.error("Failed to generate efficiency report:", error);
       res.status(500).json({ error: "Failed to generate efficiency report" });
