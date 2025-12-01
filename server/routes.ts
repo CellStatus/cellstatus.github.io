@@ -600,8 +600,10 @@ export async function registerRoutes(
           ? machineStats.reduce((sum, s) => sum + s.unitsProduced, 0)
           : (useFallbacks ? machine.unitsProduced : 0);
         
-        // Finished only if there's a production stat for today's local date (YYYY-MM-DD)
-        const finishedToday = stats.some(s => s.machineId === machine.id && s.date === todayLocalYMD);
+        // Get list of shifts that have submitted for today's local date (YYYY-MM-DD)
+        const completedShifts = stats
+          .filter(s => s.machineId === machine.id && s.date === todayLocalYMD)
+          .map(s => s.shift);
 
         return {
           machineId: machine.id,
@@ -611,7 +613,7 @@ export async function registerRoutes(
           statsCount: machineStats.length,
           totalUnitsProduced: totalUnits,
           avgEfficiency: avgEfficiency.toFixed(1),
-          finishedToday,
+          completedShifts,
           createdAt: machine.createdAt,
           createdBy: machine.createdBy ? operatorMap.get(machine.createdBy)?.name : "System",
           lastUpdated: machine.updatedAt,

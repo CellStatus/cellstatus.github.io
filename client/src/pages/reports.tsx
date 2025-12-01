@@ -27,7 +27,7 @@ interface MachineLog {
   statsCount: number;
   totalUnitsProduced: number;
   avgEfficiency: string;
-  finishedToday: boolean;
+  completedShifts: string[];
   createdAt: string;
   createdBy: string;
   lastUpdated: string;
@@ -315,10 +315,13 @@ export default function Reports() {
                           <td className="text-right py-1 px-1 tabular-nums">{log.avgEfficiency}%</td>
                           <td className="text-right py-1 px-1">
                             {(() => {
-                              const isFinished = !!log.finishedToday;
+                              const shiftMap: Record<string, number> = { Day: 1, Afternoon: 2, Midnight: 3 };
+                              const nums = log.completedShifts.map(s => shiftMap[s]).filter(Boolean).sort((a, b) => a - b);
+                              const allShifts = nums.length === 3;
+                              const display = allShifts ? "All" : nums.join(", ") || "—";
                               return (
-                                <Badge variant={isFinished ? "default" : "secondary"} className="text-xxs">
-                                  {isFinished ? "Done" : "Pending"}
+                                <Badge variant={nums.length > 0 ? "default" : "secondary"} className="text-xxs">
+                                  {display}
                                 </Badge>
                               );
                             })()}
