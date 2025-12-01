@@ -3,7 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { FileDown } from "lucide-react";
 
 interface BoxPlotData {
@@ -101,15 +100,6 @@ export default function Reports() {
     );
   }
 
-  const boxPlotChartData = reportData?.data?.map((item) => ({
-    name: `${item.machineName}\n(${item.operatorName})`,
-    min: item.min,
-    q1: item.q1,
-    median: item.median,
-    q3: item.q3,
-    max: item.max,
-    mean: item.mean,
-  })) || [];
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -133,49 +123,7 @@ export default function Reports() {
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {boxPlotChartData.length === 0 ? (
-          <div className="p-4">
-            <Card>
-              <CardContent className="pt-6 text-center">
-                <p className="text-muted-foreground">No production data available to generate report</p>
-              </CardContent>
-            </Card>
-          </div>
-        ) : (
-          <div className="p-4 space-y-4">
-            <Card className="flex-shrink-0">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-lg">Efficiency Distribution</CardTitle>
-                <CardDescription className="text-xs">
-                  Box plot showing efficiency percentages for each machine-operator pair
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={boxPlotChartData} layout="vertical" margin={{ left: 150, right: 20 }}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis type="number" />
-                    <YAxis dataKey="name" type="category" width={145} tick={{ fontSize: 12 }} />
-                    <Tooltip
-                      formatter={(value) => {
-                        if (typeof value === "number") {
-                          return value.toFixed(1) + "%";
-                        }
-                        return value;
-                      }}
-                    />
-                    <Legend wrapperStyle={{ paddingTop: "16px" }} />
-                    <Bar dataKey="min" fill="#8b5cf6" name="Min" />
-                    <Bar dataKey="q1" fill="#6366f1" name="Q1" />
-                    <Bar dataKey="median" fill="#3b82f6" name="Median" />
-                    <Bar dataKey="q3" fill="#06b6d4" name="Q3" />
-                    <Bar dataKey="max" fill="#10b981" name="Max" />
-                    <Bar dataKey="mean" fill="#f59e0b" name="Mean" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-
+        <div className="p-4 space-y-4">
             <Card className="flex-shrink-0">
               <CardHeader className="pb-3">
                 <CardTitle className="text-lg">Machine Logs</CardTitle>
@@ -245,8 +193,7 @@ export default function Reports() {
                 </div>
               </CardContent>
             </Card>
-          </div>
-        )}
+        </div>
       </div>
     </div>
   );
