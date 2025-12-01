@@ -46,6 +46,9 @@ export interface IStorage {
   getProductionStats(): Promise<ProductionStat[]>;
   getProductionStatsByMachine(machineId: string): Promise<ProductionStat[]>;
   createProductionStat(stat: InsertProductionStat, operatorId?: string): Promise<ProductionStat>;
+  deleteProductionStat(id: string): Promise<boolean>;
+  deleteProductionStatsByMachineAndDate(machineId: string, date: string): Promise<number>;
+  deleteProductionStatsByMachineDateShift(machineId: string, date: string, shift: string): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -105,7 +108,7 @@ export class DatabaseStorage implements IStorage {
       id,
       name: machine.name,
       machineId: machine.machineId,
-      status: machine.status,
+      status: machine.status as MachineStatus,
       operatorId: machine.operatorId ?? null,
       unitsProduced: machine.unitsProduced ?? 0,
       targetUnits: machine.targetUnits ?? 100,
@@ -131,7 +134,7 @@ export class DatabaseStorage implements IStorage {
       .set({
         name: updates.name ?? machine.name,
         machineId: updates.machineId ?? machine.machineId,
-        status: updates.status ?? machine.status,
+        status: (updates.status ?? machine.status) as MachineStatus,
         operatorId: updates.operatorId !== undefined ? updates.operatorId : machine.operatorId,
         unitsProduced: updates.unitsProduced ?? machine.unitsProduced,
         targetUnits: updates.targetUnits ?? machine.targetUnits,
@@ -350,6 +353,37 @@ export class DatabaseStorage implements IStorage {
     });
 
     return (await db.select().from(productionStats).where(eq(productionStats.id, id)).limit(1))[0]!;
+  }
+
+  async deleteProductionStat(id: string): Promise<boolean> {
+    await db.delete(productionStats).where(eq(productionStats.id, id));
+    return true;
+  }
+
+  async deleteProductionStatsByMachineAndDate(machineId: string, date: string): Promise<number> {
+    const toDelete = await db
+      .select({ id: productionStats.id })
+      .from(productionStats)
+      .where(and(eq(productionStats.machineId, machineId), eq(productionStats.date, date)));
+
+    await db
+      .delete(productionStats)
+      .where(and(eq(productionStats.machineId, machineId), eq(productionStats.date, date)));
+
+    return toDelete.length;
+  }
+
+  async deleteProductionStatsByMachineDateShift(machineId: string, date: string, shift: string): Promise<number> {
+    const toDelete = await db
+      .select({ id: productionStats.id })
+      .from(productionStats)
+      .where(and(eq(productionStats.machineId, machineId), eq(productionStats.date, date), eq(productionStats.shift, shift)));
+
+    await db
+      .delete(productionStats)
+      .where(and(eq(productionStats.machineId, machineId), eq(productionStats.date, date), eq(productionStats.shift, shift)));
+
+    return toDelete.length;
   }
 }
 

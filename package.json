@@ -9,6 +9,7 @@
     "start": "node dist/index.cjs",
     "check": "tsc",
     "db:push": "drizzle-kit push",
+    "db:seed": "tsx script/seed.ts",
     "predeploy": "npm run build",
     "deploy": "cp dist/public/index.html dist/public/404.html && gh-pages -d dist/public"
   },

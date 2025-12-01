@@ -13,6 +13,8 @@ import {
   TrendingUp,
   UserCircle,
   MoreVertical,
+  Send,
+  Trash2,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -29,6 +31,11 @@ interface MachineStatusCardProps {
   onAssignOperator: (machineId: string) => void;
   onLogMaintenance: (machineId: string) => void;
   onEditMachine: (machine: Machine) => void;
+  onSubmitStats: (machineId: string) => void;
+  onDeleteStats: (machineId: string) => void;
+  isSubmittedToday: boolean;
+  isPendingSubmit: boolean;
+  isPendingDelete: boolean;
 }
 
 const statusConfig: Record<MachineStatus, { 
@@ -76,6 +83,11 @@ export function MachineStatusCard({
   onAssignOperator,
   onLogMaintenance,
   onEditMachine,
+  onSubmitStats,
+  onDeleteStats,
+  isSubmittedToday,
+  isPendingSubmit,
+  isPendingDelete,
 }: MachineStatusCardProps) {
   const status = statusConfig[machine.status];
   const StatusIcon = status.icon;
@@ -86,13 +98,13 @@ export function MachineStatusCard({
 
   return (
     <Card 
-      className={`overflow-visible border-t-4 ${status.borderClass}`}
+      className={`overflow-visible border-t-4 ${status.borderClass} ${isSubmittedToday ? 'opacity-60' : ''}`}
       data-testid={`card-machine-${machine.id}`}
     >
       <CardHeader className="flex flex-row items-start justify-between gap-4 pb-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="text-lg font-semibold truncate" data-testid={`text-machine-name-${machine.id}`}>
+            <h3 className={`text-lg font-semibold truncate ${isSubmittedToday ? 'opacity-70' : ''}`} data-testid={`text-machine-name-${machine.id}`}>
               {machine.name}
             </h3>
             <Badge variant="outline" className="font-mono text-xs shrink-0">
@@ -238,6 +250,33 @@ export function MachineStatusCard({
             <Wrench className="h-3.5 w-3.5" />
           </Button>
         </div>
+
+        {/* Submit Stats Button */}
+        {isSubmittedToday ? (
+          <Button
+            variant="secondary"
+            size="sm"
+            className="w-full gap-2"
+            onClick={() => onDeleteStats(machine.id)}
+            disabled={isPendingDelete || isPendingSubmit}
+            data-testid={`button-undo-stats-${machine.id}`}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Stats Submitted for Shift - Undo
+          </Button>
+        ) : (
+          <Button
+            variant="default"
+            size="sm"
+            className="w-full gap-2"
+            onClick={() => onSubmitStats(machine.id)}
+            disabled={isPendingSubmit || isPendingDelete}
+            data-testid={`button-submit-stats-${machine.id}`}
+          >
+            <Send className="h-3.5 w-3.5" />
+            Submit Production Stats
+          </Button>
+        )}
 
         {/* Last Updated */}
         {machine.lastUpdated && (

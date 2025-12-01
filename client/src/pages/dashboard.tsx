@@ -7,6 +7,7 @@ import { MachineStatusCard } from "@/components/machine-status-card";
 import { MachineDialog } from "@/components/machine-dialog";
 import { MaintenanceDialog } from "@/components/maintenance-dialog";
 import { AssignOperatorDialog } from "@/components/assign-operator-dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { 
@@ -20,7 +21,7 @@ import {
   Target,
   Clock,
 } from "lucide-react";
-import type { Machine, Operator, MachineStatus } from "@shared/schema";
+import type { Machine, Operator, MachineStatus, ProductionStat } from "@shared/schema";
 
 export default function Dashboard() {
   const { toast } = useToast();
@@ -30,6 +31,11 @@ export default function Dashboard() {
   const [maintenanceMachineId, setMaintenanceMachineId] = useState<string | undefined>();
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
   const [assigningMachine, setAssigningMachine] = useState<Machine | null>(null);
+  const getAutoShift = () => {
+    const hour = new Date().getHours();
+    return hour >= 6 && hour < 14 ? "Day" : hour >= 14 && hour < 22 ? "Afternoon" : "Midnight";
+  };
+  const [selectedShift, setSelectedShift] = useState<string>(getAutoShift());
 
   const { data: machines = [], isLoading: machinesLoading } = useQuery<Machine[]>({
     queryKey: ["/api/machines"],
@@ -37,6 +43,10 @@ export default function Dashboard() {
 
   const { data: operators = [] } = useQuery<Operator[]>({
     queryKey: ["/api/operators"],
+  });
+
+  const { data: productionStats = [] } = useQuery<ProductionStat[]>({
+    queryKey: ["/api/production-stats"],
   });
 
   const createMachineMutation = useMutation({
@@ -90,6 +100,46 @@ export default function Dashboard() {
     },
   });
 
+  const submitProductionStatMutation = useMutation({
+    mutationFn: (data: { 
+      machineId: string; 
+      shift: string; 
+      date: string; 
+      unitsProduced: number; 
+      targetUnits: number; 
+      efficiency: number | null;
+    }) => apiRequest("POST", "/api/production-stats", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/production-stats"] });
+      // Ensure reports reflect today's submission immediately
+      queryClient.invalidateQueries({ queryKey: ["/api/reports/efficiency"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reports/machine-history"] });
+      toast({ title: "Production stats submitted successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to submit production stats", variant: "destructive" });
+    },
+  });
+
+  const deleteProductionStatsMutation = useMutation({
+    mutationFn: async ({ machineId, date, shift }: { machineId: string; date: string; shift?: string }) => {
+      // Single bulk delete request to avoid rate limits
+      const url = `/api/production-stats/by-date?machineId=${encodeURIComponent(machineId)}&date=${encodeURIComponent(date)}${shift ? `&shift=${encodeURIComponent(shift)}` : ""}`;
+      await apiRequest("DELETE", url);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/production-stats"] });
+      // Ensure reports reflect deletion immediately
+      queryClient.invalidateQueries({ queryKey: ["/api/reports/efficiency"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reports/machine-history"] });
+      toast({ title: "Production stats deleted successfully" });
+    },
+    onError: (error) => {
+      console.error("Delete stats error:", error);
+      toast({ title: "Failed to delete production stats", variant: "destructive" });
+    },
+  });
+
   const createMaintenanceMutation = useMutation({
     mutationFn: (data: Record<string, unknown>) => apiRequest("POST", "/api/maintenance", data),
     onSuccess: () => {
@@ -131,6 +181,28 @@ export default function Dashboard() {
     setMaintenanceDialogOpen(true);
   };
 
+  const handleSubmitStats = (machineId: string) => {
+    const machine = machines.find((m) => m.id === machineId);
+    if (!machine) return;
+    const d = new Date();
+    const today = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    
+    submitProductionStatMutation.mutate({
+      machineId: machine.id,
+      shift: selectedShift,
+      date: today,
+      unitsProduced: machine.unitsProduced,
+      targetUnits: machine.targetUnits,
+      efficiency: machine.efficiency,
+    });
+  };
+
+  const handleDeleteStats = (machineId: string) => {
+    const d = new Date();
+    const today = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    deleteProductionStatsMutation.mutate({ machineId, date: today, shift: selectedShift });
+  };
+
   const handleMachineSubmit = (data: Record<string, unknown>) => {
     if (editingMachine) {
       updateMachineMutation.mutate({ id: editingMachine.id, ...data });
@@ -161,6 +233,14 @@ export default function Dashboard() {
     return operators.find((o) => o.id === id);
   };
 
+  // Get latest production stat date for each machine
+  const getLatestStatDate = (machineId: string): string | null => {
+    const machineStats = productionStats
+      .filter(s => s.machineId === machineId)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return machineStats.length > 0 ? machineStats[0].date : null;
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* Header Stats */}
@@ -170,10 +250,25 @@ export default function Dashboard() {
             <h1 className="text-2xl font-semibold" data-testid="text-dashboard-title">Cell Dashboard</h1>
             <p className="text-sm text-muted-foreground">Real-time manufacturing cell status</p>
           </div>
-          <Button onClick={handleAddMachine} className="gap-2 shrink-0" data-testid="button-add-machine">
-            <Plus className="h-4 w-4" />
-            Add Machine
-          </Button>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Shift</span>
+              <Select value={selectedShift} onValueChange={(v) => setSelectedShift(v)}>
+                <SelectTrigger className="w-[140px]" data-testid="select-shift-picker">
+                  <SelectValue placeholder="Select shift" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Day">Day</SelectItem>
+                  <SelectItem value="Afternoon">Afternoon</SelectItem>
+                  <SelectItem value="Midnight">Midnight</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <Button onClick={handleAddMachine} className="gap-2 shrink-0" data-testid="button-add-machine">
+              <Plus className="h-4 w-4" />
+              Add Machine
+            </Button>
+          </div>
         </div>
 
         {/* Summary Stats */}
@@ -279,17 +374,28 @@ export default function Dashboard() {
           </div>
         ) : (
           <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {machines.map((machine) => (
-              <MachineStatusCard
-                key={machine.id}
-                machine={machine}
-                operator={getOperatorById(machine.operatorId)}
-                onStatusChange={handleStatusChange}
-                onAssignOperator={handleAssignOperator}
-                onLogMaintenance={handleLogMaintenance}
-                onEditMachine={handleEditMachine}
-              />
-            ))}
+            {machines.map((machine) => {
+              const d = new Date();
+              const today = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+              const isSubmittedToday = productionStats.some(s => s.machineId === machine.id && s.date === today && s.shift === selectedShift);
+              
+              return (
+                <MachineStatusCard
+                  key={machine.id}
+                  machine={machine}
+                  operator={getOperatorById(machine.operatorId)}
+                  onStatusChange={handleStatusChange}
+                  onAssignOperator={handleAssignOperator}
+                  onLogMaintenance={handleLogMaintenance}
+                  onEditMachine={handleEditMachine}
+                  onSubmitStats={handleSubmitStats}
+                  onDeleteStats={handleDeleteStats}
+                  isSubmittedToday={isSubmittedToday}
+                  isPendingSubmit={submitProductionStatMutation.isPending}
+                  isPendingDelete={deleteProductionStatsMutation.isPending}
+                />
+              );
+            })}
           </div>
         )}
       </div>

@@ -334,15 +334,162 @@ export async function registerRoutes(
     }
   });
 
+  // Delete production stat
+  app.delete("/api/production-stats/:id", async (req, res) => {
+    try {
+      const success = await storage.deleteProductionStat(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Production stat not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete production stat" });
+    }
+  });
+
+  // Bulk delete production stats by machine and date to avoid rate limits
+  app.delete("/api/production-stats/by-date", async (req, res) => {
+    try {
+      const { machineId, date, shift } = req.query as Record<string, string | undefined>;
+      if (!machineId || !date) {
+        return res.status(400).json({ error: "machineId and date are required" });
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return res.status(400).json({ error: "date must be YYYY-MM-DD" });
+      }
+      const deleted = shift
+        ? await storage.deleteProductionStatsByMachineDateShift(machineId, date, shift)
+        : await storage.deleteProductionStatsByMachineAndDate(machineId, date);
+      res.json({ deleted });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to bulk delete production stats" });
+    }
+  });
+
   // === REPORTS ===
 
+  // Get machine history with production stats and maintenance records
+  app.get("/api/reports/machine-history", async (req, res) => {
+    try {
+      const machines = await storage.getMachines();
+      const stats = await storage.getProductionStats();
+      const maintenanceLogs = await storage.getMaintenanceLogs();
+      const operators = await storage.getOperators();
+
+      // Parse optional filters: machines (comma-separated ids/names). Date filtering disabled.
+      const { machines: machinesParam } = req.query as Record<string, string | undefined>;
+
+      // Date range filtering removed: include all records
+
+      const machineFilters: string[] = (machinesParam || "")
+        .split(",")
+        .map(s => s.trim())
+        .filter(Boolean)
+        .map(s => s.toLowerCase());
+
+      // Create lookup maps
+      const operatorMap = new Map(operators.map(o => [o.id, o]));
+
+      // Optionally filter machines by id/name/machineId
+      const filteredMachines = machineFilters.length === 0 ? machines : machines.filter(m => {
+        const name = (m.name || "").toLowerCase();
+        const tag = (m.machineId || "").toLowerCase();
+        const id = (m.id || "").toLowerCase();
+        return machineFilters.some(f => id === f || tag === f || name.includes(f));
+      });
+
+      // Build history for each machine
+      const machineHistories = filteredMachines.map(machine => {
+        // Get all production stats for this machine, sorted by date desc
+        const productionStats = stats
+          .filter(s => s.machineId === machine.id)
+          .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+          .map(stat => ({
+            id: stat.id,
+            date: stat.date,
+            shift: stat.shift,
+            unitsProduced: stat.unitsProduced,
+            targetUnits: stat.targetUnits,
+            downtime: stat.downtime,
+            efficiency: stat.efficiency,
+            createdAt: stat.createdAt,
+            createdBy: stat.createdBy ? operatorMap.get(stat.createdBy)?.name : "System",
+          }));
+
+        // Get all maintenance records for this machine, sorted by date desc
+        const maintenance = maintenanceLogs
+          .filter(log => log.machineId === machine.id)
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          .map(log => ({
+            id: log.id,
+            type: log.type,
+            description: log.description,
+            status: log.status,
+            scheduledDate: log.scheduledDate,
+            completedDate: log.completedDate,
+            technician: log.technician,
+            notes: log.notes,
+            createdAt: log.createdAt,
+            createdBy: log.createdBy ? operatorMap.get(log.createdBy)?.name : "System",
+          }));
+
+        // Calculate summary stats
+        const totalStats = productionStats.length;
+        const totalUnitsProduced = productionStats.reduce((sum, s) => sum + s.unitsProduced, 0);
+        const avgEfficiency = productionStats.length > 0
+          ? productionStats.reduce((sum, s) => sum + (s.efficiency || 0), 0) / productionStats.length
+          : null;
+
+        const totalMaintenance = maintenance.length;
+        const openMaintenance = maintenance.filter(m => m.status !== "completed").length;
+        const completedMaintenance = maintenance.filter(m => m.status === "completed").length;
+
+        return {
+          machineId: machine.id,
+          machineName: machine.name,
+          machineIdTag: machine.machineId,
+          status: machine.status,
+          currentOperator: machine.operatorId ? operatorMap.get(machine.operatorId)?.name : "Unassigned",
+          createdAt: machine.createdAt,
+          updatedAt: machine.updatedAt,
+          summary: {
+            totalProductionStats: totalStats,
+            totalUnitsProduced,
+            avgEfficiency: avgEfficiency !== null ? parseFloat(avgEfficiency.toFixed(1)) : null,
+            totalMaintenanceRecords: totalMaintenance,
+            openMaintenance,
+            completedMaintenance,
+          },
+          productionStats,
+          maintenance,
+        };
+      }).sort((a, b) => a.machineName.localeCompare(b.machineName));
+
+      res.json({ machines: machineHistories });
+    } catch (error) {
+      console.error("Failed to generate machine history report:", error);
+      res.status(500).json({ error: "Failed to generate machine history report" });
+    }
+  });
+
   // Get efficiency box plot data grouped by machine and operator
-  app.get("/api/reports/efficiency", async (_req, res) => {
+  app.get("/api/reports/efficiency", async (req, res) => {
     try {
       const stats = await storage.getProductionStats();
       const machines = await storage.getMachines();
       const operators = await storage.getOperators();
       const maintenanceLogs = await storage.getMaintenanceLogs();
+
+      // Optional date filters (YYYY-MM-DD), default last 30 days
+      const { startDate, endDate } = req.query as Record<string, string | undefined>;
+      const today = new Date();
+      const defaultEnd = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+      const defaultStart = new Date(defaultEnd);
+      defaultStart.setUTCDate(defaultStart.getUTCDate() - 30);
+      const toYMD = (d: Date) => d.toISOString().split("T")[0];
+      const start = (startDate && /^\d{4}-\d{2}-\d{2}$/.test(startDate)) ? startDate : toYMD(defaultStart);
+      const end = (endDate && /^\d{4}-\d{2}-\d{2}$/.test(endDate)) ? endDate : toYMD(defaultEnd);
+      const explicitRange = typeof startDate !== "undefined" || typeof endDate !== "undefined";
 
       // Get users for authenticated user lookup
       const allUsers = await db.select().from(users);
@@ -356,7 +503,10 @@ export async function registerRoutes(
       type GroupKey = string;
       const groups = new Map<GroupKey, number[]>();
 
-      for (const stat of stats) {
+      // Date filtering disabled: include all production stats
+      const filteredStats = stats;
+
+      for (const stat of filteredStats) {
         if (stat.efficiency !== null && stat.efficiency !== undefined) {
           const key = `${stat.machineId}|${stat.createdBy || "unknown"}`;
           if (!groups.has(key)) {
@@ -414,14 +564,45 @@ export async function registerRoutes(
         return a.operatorName.localeCompare(b.operatorName);
       });
 
-      // Build machine logs with stats
+      // Build machine logs with stats (with sensible efficiency fallbacks)
+      const todayLocalYMD = (() => {
+        const d = new Date();
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const day = String(d.getDate()).padStart(2, "0");
+        return `${y}-${m}-${day}`;
+      })();
       const machineLogs = machines.map(machine => {
-        const machineStats = stats.filter(s => s.machineId === machine.id);
-        const avgEfficiency = machineStats.length > 0 
-          ? machineStats.reduce((sum, s) => sum + (s.efficiency || 0), 0) / machineStats.length 
-          : 0;
-        const totalUnits = machineStats.reduce((sum, s) => sum + s.unitsProduced, 0);
+        const machineStats = filteredStats.filter(s => s.machineId === machine.id);
+
+        // Use only non-null efficiency values from stats
+        const statEffs = machineStats
+          .map(s => s.efficiency)
+          .filter((e): e is number => typeof e === "number");
+
+        const avgFromStats = statEffs.length > 0
+          ? statEffs.reduce((sum, e) => sum + e, 0) / statEffs.length
+          : null;
+
+        // Use machine fallbacks unconditionally (no explicit date filtering)
+        const useFallbacks = true;
+
+        const fallbackEff = typeof machine.efficiency === "number"
+          ? machine.efficiency
+          : (machine.targetUnits && machine.targetUnits > 0
+              ? (machine.unitsProduced / machine.targetUnits) * 100
+              : 0);
+
+        const avgEfficiency = avgFromStats ?? (useFallbacks ? fallbackEff : 0);
+
+        // If no stats rows, show 0 when filtering explicitly; else sum from stats or fallback to machine units
+        const totalUnits = machineStats.length > 0
+          ? machineStats.reduce((sum, s) => sum + s.unitsProduced, 0)
+          : (useFallbacks ? machine.unitsProduced : 0);
         
+        // Finished only if there's a production stat for today's local date (YYYY-MM-DD)
+        const finishedToday = stats.some(s => s.machineId === machine.id && s.date === todayLocalYMD);
+
         return {
           machineId: machine.id,
           machineName: machine.name,
@@ -430,6 +611,7 @@ export async function registerRoutes(
           statsCount: machineStats.length,
           totalUnitsProduced: totalUnits,
           avgEfficiency: avgEfficiency.toFixed(1),
+          finishedToday,
           createdAt: machine.createdAt,
           createdBy: machine.createdBy ? operatorMap.get(machine.createdBy)?.name : "System",
           lastUpdated: machine.updatedAt,
@@ -462,11 +644,12 @@ export async function registerRoutes(
       });
 
 
-      maintenanceLogs.forEach(log => {
+      // Only include completed maintenance logs in activities
+      maintenanceLogs.filter(log => log.status === "completed").forEach(log => {
         if (log.createdBy) {
           if (!activities.has(log.createdBy)) activities.set(log.createdBy, []);
           activities.get(log.createdBy)!.push({
-            type: "Maintenance Activity",
+            type: "Completed Maintenance",
             target: machineMap.get(log.machineId)?.name || "Unknown",
             timestamp: log.createdAt,
             details: `${log.type} - ${log.description}`
@@ -486,7 +669,8 @@ export async function registerRoutes(
       }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
       // Build maintenance logs with machine names
-      const maintenanceLogsReport = maintenanceLogs.map(log => ({
+      const maintenanceLogsReport = maintenanceLogs
+        .map(log => ({
         id: log.id,
         machineId: log.machineId,
         machineName: machineMap.get(log.machineId)?.name || "Unknown",
