@@ -50,13 +50,16 @@ interface ReportResponse {
 
 export default function Reports() {
   const [reportGenerated, setReportGenerated] = useState(false);
+  const [reportTimestamp, setReportTimestamp] = useState<Date | null>(null);
 
   const { data: reportData, isLoading } = useQuery<ReportResponse>({
     queryKey: ["/api/reports/efficiency"],
     enabled: reportGenerated,
+    staleTime: 0,
   });
 
   const handleGenerateReport = () => {
+    setReportTimestamp(new Date());
     setReportGenerated(true);
   };
 
@@ -108,7 +111,7 @@ export default function Reports() {
           <div>
             <h1 className="text-2xl font-bold">Production Efficiency Report</h1>
             <p className="text-muted-foreground text-sm mt-1">
-              Generated on {new Date().toLocaleDateString()} at {new Date().toLocaleTimeString()}
+              Generated on {reportTimestamp?.toLocaleDateString()} at {reportTimestamp?.toLocaleTimeString()}
             </p>
           </div>
           <Button
