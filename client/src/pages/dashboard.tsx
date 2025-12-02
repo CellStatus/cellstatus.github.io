@@ -7,6 +7,8 @@ import { MachineStatusCard } from "@/components/machine-status-card";
 import { MachineDialog } from "@/components/machine-dialog";
 import { MaintenanceDialog } from "@/components/maintenance-dialog";
 import { AssignOperatorDialog } from "@/components/assign-operator-dialog";
+import { DowntimeDialog } from "@/components/downtime-dialog";
+import { ResolveDowntimeDialog } from "@/components/resolve-downtime-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -21,7 +23,7 @@ import {
   Target,
   Clock,
 } from "lucide-react";
-import type { Machine, Operator, MachineStatus, ProductionStat } from "@shared/schema";
+import type { Machine, Operator, MachineStatus, ProductionStat, DowntimeLog } from "@shared/schema";
 
 export default function Dashboard() {
   const { toast } = useToast();
@@ -32,6 +34,10 @@ export default function Dashboard() {
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
   const [assigningMachine, setAssigningMachine] = useState<Machine | null>(null);
   const [selectedShift, setSelectedShift] = useState<string>("Day");
+  const [downtimeDialogOpen, setDowntimeDialogOpen] = useState(false);
+  const [downtimeMachineId, setDowntimeMachineId] = useState<string | undefined>();
+  const [resolveDialogOpen, setResolveDialogOpen] = useState(false);
+  const [resolvingDowntime, setResolvingDowntime] = useState<DowntimeLog | null>(null);
 
   const { data: machines = [], isLoading: machinesLoading } = useQuery<Machine[]>({
     queryKey: ["/api/machines"],
@@ -43,6 +49,11 @@ export default function Dashboard() {
 
   const { data: productionStats = [] } = useQuery<ProductionStat[]>({
     queryKey: ["/api/production-stats"],
+  });
+
+  const { data: activeDowntime = [] } = useQuery<DowntimeLog[]>({
+    queryKey: ["/api/downtime/active"],
+    refetchInterval: 30000, // Refresh every 30 seconds
   });
 
   const createMachineMutation = useMutation({
@@ -150,6 +161,35 @@ export default function Dashboard() {
     },
   });
 
+  const createDowntimeMutation = useMutation({
+    mutationFn: (data: Record<string, unknown>) => apiRequest("POST", "/api/downtime", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/downtime/active"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/downtime"] });
+      setDowntimeDialogOpen(false);
+      setDowntimeMachineId(undefined);
+      toast({ title: "Downtime logged successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to log downtime", variant: "destructive" });
+    },
+  });
+
+  const resolveDowntimeMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) => 
+      apiRequest("PATCH", `/api/downtime/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/downtime/active"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/downtime"] });
+      setResolveDialogOpen(false);
+      setResolvingDowntime(null);
+      toast({ title: "Downtime resolved successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to resolve downtime", variant: "destructive" });
+    },
+  });
+
   const handleAddMachine = () => {
     setEditingMachine(null);
     setMachineDialogOpen(true);
@@ -175,6 +215,16 @@ export default function Dashboard() {
   const handleLogMaintenance = (machineId: string) => {
     setMaintenanceMachineId(machineId);
     setMaintenanceDialogOpen(true);
+  };
+
+  const handleLogDowntime = (machineId: string) => {
+    setDowntimeMachineId(machineId);
+    setDowntimeDialogOpen(true);
+  };
+
+  const handleResolveDowntime = (downtimeLog: DowntimeLog) => {
+    setResolvingDowntime(downtimeLog);
+    setResolveDialogOpen(true);
   };
 
   const handleSubmitStats = (machineId: string) => {
@@ -223,6 +273,27 @@ export default function Dashboard() {
   const avgEfficiency = machines.length > 0
     ? machines.reduce((sum, m) => sum + (m.efficiency ?? 0), 0) / machines.length
     : 0;
+
+  // Calculate active downtime duration
+  const getActiveDowntimeForMachine = (machineId: string) => {
+    return activeDowntime.find(d => d.machineId === machineId);
+  };
+
+  // Calculate total active downtime duration in minutes
+  const totalActiveDowntimeMinutes = activeDowntime.reduce((sum, d) => {
+    const start = new Date(d.startTime).getTime();
+    const now = Date.now();
+    return sum + Math.round((now - start) / 60000);
+  }, 0);
+
+  const formatDowntimeDuration = (minutes: number): string => {
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    if (hours > 0) {
+      return `${hours}h ${remainingMinutes}m`;
+    }
+    return `${minutes}m`;
+  };
 
   const getOperatorById = (id: string | null) => {
     if (!id) return undefined;
@@ -302,7 +373,14 @@ export default function Dashboard() {
             </div>
             <div>
               <p className="text-2xl font-mono font-bold" data-testid="stat-down">{downCount}</p>
-              <p className="text-xs text-muted-foreground">Down</p>
+              <p className="text-xs text-muted-foreground">
+                Down
+                {activeDowntime.length > 0 && (
+                  <span className="text-machine-down ml-1">
+                    ({formatDowntimeDuration(totalActiveDowntimeMinutes)} active)
+                  </span>
+                )}
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-3 rounded-md bg-background p-3">
@@ -374,6 +452,7 @@ export default function Dashboard() {
               const d = new Date();
               const today = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
               const isSubmittedToday = productionStats.some(s => s.machineId === machine.id && s.date === today && s.shift === selectedShift);
+              const machineDowntime = getActiveDowntimeForMachine(machine.id);
               
               return (
                 <MachineStatusCard
@@ -383,12 +462,15 @@ export default function Dashboard() {
                   onStatusChange={handleStatusChange}
                   onAssignOperator={handleAssignOperator}
                   onLogMaintenance={handleLogMaintenance}
+                  onLogDowntime={handleLogDowntime}
                   onEditMachine={handleEditMachine}
                   onSubmitStats={handleSubmitStats}
                   onDeleteStats={handleDeleteStats}
                   isSubmittedToday={isSubmittedToday}
                   isPendingSubmit={submitProductionStatMutation.isPending}
                   isPendingDelete={deleteProductionStatsMutation.isPending}
+                  activeDowntime={machineDowntime}
+                  onResolveDowntime={handleResolveDowntime}
                 />
               );
             })}
@@ -421,6 +503,24 @@ export default function Dashboard() {
         operators={operators}
         onAssign={handleOperatorAssign}
         isPending={assignOperatorMutation.isPending}
+      />
+
+      <DowntimeDialog
+        open={downtimeDialogOpen}
+        onOpenChange={setDowntimeDialogOpen}
+        machines={machines}
+        preselectedMachineId={downtimeMachineId}
+        onSubmit={(data) => createDowntimeMutation.mutate(data)}
+        isPending={createDowntimeMutation.isPending}
+      />
+
+      <ResolveDowntimeDialog
+        open={resolveDialogOpen}
+        onOpenChange={setResolveDialogOpen}
+        downtimeLog={resolvingDowntime}
+        machineName={resolvingDowntime ? machines.find(m => m.id === resolvingDowntime.machineId)?.name : undefined}
+        onSubmit={(id, data) => resolveDowntimeMutation.mutate({ id, data })}
+        isPending={resolveDowntimeMutation.isPending}
       />
     </div>
   );

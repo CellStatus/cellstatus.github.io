@@ -3,14 +3,17 @@ import {
   type Operator, type InsertOperator,
   type MaintenanceLog, type InsertMaintenanceLog,
   type ProductionStat, type InsertProductionStat,
+  type DowntimeLog, type InsertDowntimeLog,
   type MachineStatus,
+  type DowntimeReasonCode,
+  type DowntimeCategory,
   type User,
   type UpsertUser,
-  machines, operators, maintenanceLogs, productionStats, users,
+  machines, operators, maintenanceLogs, productionStats, users, downtimeLogs,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 
 export interface IStorage {
   // Users (REQUIRED for Replit Auth)
@@ -49,6 +52,15 @@ export interface IStorage {
   deleteProductionStat(id: string): Promise<boolean>;
   deleteProductionStatsByMachineAndDate(machineId: string, date: string): Promise<number>;
   deleteProductionStatsByMachineDateShift(machineId: string, date: string, shift: string): Promise<number>;
+
+  // Downtime Logs
+  getDowntimeLogs(): Promise<DowntimeLog[]>;
+  getDowntimeLog(id: string): Promise<DowntimeLog | undefined>;
+  getDowntimeLogsByMachine(machineId: string): Promise<DowntimeLog[]>;
+  getActiveDowntimeLogs(): Promise<DowntimeLog[]>;
+  createDowntimeLog(log: InsertDowntimeLog): Promise<DowntimeLog>;
+  updateDowntimeLog(id: string, updates: Partial<InsertDowntimeLog>): Promise<DowntimeLog | undefined>;
+  deleteDowntimeLog(id: string): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -384,6 +396,79 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(productionStats.machineId, machineId), eq(productionStats.date, date), eq(productionStats.shift, shift)));
 
     return toDelete.length;
+  }
+
+  // Downtime Logs
+  async getDowntimeLogs(): Promise<DowntimeLog[]> {
+    return await db.select().from(downtimeLogs);
+  }
+
+  async getDowntimeLog(id: string): Promise<DowntimeLog | undefined> {
+    const result = await db.select().from(downtimeLogs).where(eq(downtimeLogs.id, id)).limit(1);
+    return result[0];
+  }
+
+  async getDowntimeLogsByMachine(machineId: string): Promise<DowntimeLog[]> {
+    return await db.select().from(downtimeLogs).where(eq(downtimeLogs.machineId, machineId));
+  }
+
+  async getActiveDowntimeLogs(): Promise<DowntimeLog[]> {
+    return await db.select().from(downtimeLogs).where(isNull(downtimeLogs.endTime));
+  }
+
+  async createDowntimeLog(log: InsertDowntimeLog): Promise<DowntimeLog> {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+
+    await db.insert(downtimeLogs).values({
+      id,
+      machineId: log.machineId,
+      reasonCode: log.reasonCode as DowntimeReasonCode,
+      reasonCategory: log.reasonCategory as DowntimeCategory,
+      description: log.description ?? null,
+      startTime: log.startTime,
+      endTime: log.endTime ?? null,
+      duration: log.duration ?? null,
+      reportedBy: log.reportedBy ?? null,
+      resolvedBy: log.resolvedBy ?? null,
+      createdAt: now,
+    });
+
+    return (await this.getDowntimeLog(id))!;
+  }
+
+  async updateDowntimeLog(id: string, updates: Partial<InsertDowntimeLog>): Promise<DowntimeLog | undefined> {
+    const log = await this.getDowntimeLog(id);
+    if (!log) return undefined;
+
+    // Calculate duration if endTime is being set and startTime exists
+    let duration = updates.duration ?? log.duration;
+    if (updates.endTime && log.startTime) {
+      const start = new Date(log.startTime).getTime();
+      const end = new Date(updates.endTime).getTime();
+      duration = Math.round((end - start) / 60000); // Convert ms to minutes
+    }
+
+    await db.update(downtimeLogs)
+      .set({
+        machineId: updates.machineId ?? log.machineId,
+        reasonCode: (updates.reasonCode ?? log.reasonCode) as DowntimeReasonCode,
+        reasonCategory: (updates.reasonCategory ?? log.reasonCategory) as DowntimeCategory,
+        description: updates.description !== undefined ? updates.description : log.description,
+        startTime: updates.startTime ?? log.startTime,
+        endTime: updates.endTime !== undefined ? updates.endTime : log.endTime,
+        duration: duration,
+        reportedBy: updates.reportedBy !== undefined ? updates.reportedBy : log.reportedBy,
+        resolvedBy: updates.resolvedBy !== undefined ? updates.resolvedBy : log.resolvedBy,
+      })
+      .where(eq(downtimeLogs.id, id));
+
+    return (await this.getDowntimeLog(id))!;
+  }
+
+  async deleteDowntimeLog(id: string): Promise<boolean> {
+    await db.delete(downtimeLogs).where(eq(downtimeLogs.id, id));
+    return true;
   }
 }
 

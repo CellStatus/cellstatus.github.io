@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { FileDown, History, TrendingUp, Plus, Trash2 } from "lucide-react";
+import { FileDown, History, TrendingUp, Plus, Trash2, AlertTriangle, Clock } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -16,7 +16,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { Machine, ProductionStat } from "@shared/schema";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  Legend,
+} from "recharts";
+import type { Machine, ProductionStat, DowntimeLog } from "@shared/schema";
+import { downtimeReasonCodes, downtimeCategories } from "@shared/schema";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 
 interface MachineLog {
@@ -114,10 +127,35 @@ interface MaintenanceHistory {
   createdBy: string;
 }
 
+interface DowntimeStats {
+  summary: {
+    totalIncidents: number;
+    totalDowntimeMinutes: number;
+    totalDowntimeHours: number;
+    activeIncidents: number;
+    todayDowntimeMinutes: number;
+    todayDowntimeHours: number;
+    avgDurationMinutes: number;
+  };
+  byReasonCode: Record<string, { count: number; totalMinutes: number }>;
+  byCategory: Record<string, { count: number; totalMinutes: number }>;
+  byMachine: Record<string, { count: number; totalMinutes: number; machineName: string }>;
+}
+
+// Colors for downtime categories
+const categoryColors: Record<string, string> = {
+  mechanical: "#ef4444",
+  electrical: "#f59e0b",
+  material: "#3b82f6",
+  operator: "#8b5cf6",
+  quality: "#ec4899",
+  other: "#6b7280",
+};
+
 export default function Reports() {
   const [reportGenerated, setReportGenerated] = useState(false);
   const [reportTimestamp, setReportTimestamp] = useState<Date | null>(null);
-  const [activeTab, setActiveTab] = useState<"efficiency" | "history" | "production">("efficiency");
+  const [activeTab, setActiveTab] = useState<"efficiency" | "history" | "production" | "downtime">("efficiency");
   const todayLocal = useMemo(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -144,7 +182,20 @@ export default function Reports() {
   });
   const { data: machines = [] } = useQuery<Machine[]>({
     queryKey: ["/api/machines"],
-    enabled: reportGenerated && activeTab === "production",
+    enabled: reportGenerated && (activeTab === "production" || activeTab === "downtime"),
+    staleTime: 0,
+  });
+
+  // Downtime data for the downtime analysis tab
+  const { data: downtimeLogs = [] } = useQuery<DowntimeLog[]>({
+    queryKey: ["/api/downtime"],
+    enabled: reportGenerated && activeTab === "downtime",
+    staleTime: 0,
+  });
+
+  const { data: downtimeStats } = useQuery<DowntimeStats>({
+    queryKey: ["/api/downtime/stats"],
+    enabled: reportGenerated && activeTab === "downtime",
     staleTime: 0,
   });
 
@@ -262,21 +313,25 @@ export default function Reports() {
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "efficiency" | "history")} className="h-full flex flex-col">
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "efficiency" | "history" | "production" | "downtime")} className="h-full flex flex-col">
           <div className="flex-shrink-0 border-b px-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between py-3">
-              <TabsList className="grid w-full md:w-auto grid-cols-3">
+              <TabsList className="grid w-full md:w-auto grid-cols-4">
                 <TabsTrigger value="efficiency" className="gap-2">
                   <TrendingUp className="h-4 w-4" />
-                  Efficiency Analysis
+                  Efficiency
                 </TabsTrigger>
                 <TabsTrigger value="history" className="gap-2">
                   <History className="h-4 w-4" />
-                  Machine History
+                  History
                 </TabsTrigger>
                 <TabsTrigger value="production" className="gap-2">
                   <TrendingUp className="h-4 w-4" />
-                  Production Stats
+                  Production
+                </TabsTrigger>
+                <TabsTrigger value="downtime" className="gap-2">
+                  <AlertTriangle className="h-4 w-4" />
+                  Downtime
                 </TabsTrigger>
               </TabsList>
               
@@ -659,6 +714,263 @@ export default function Reports() {
                               </tr>
                             );
                           })}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="downtime" className="flex-1 overflow-y-auto m-0">
+            <div className="p-4 space-y-4">
+              {/* Summary Stats */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardDescription className="text-xs">Total Incidents</CardDescription>
+                    <CardTitle className="text-2xl font-mono">{downtimeStats?.summary.totalIncidents ?? 0}</CardTitle>
+                  </CardHeader>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardDescription className="text-xs">Total Downtime</CardDescription>
+                    <CardTitle className="text-2xl font-mono">{downtimeStats?.summary.totalDowntimeHours.toFixed(1) ?? 0}h</CardTitle>
+                  </CardHeader>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardDescription className="text-xs">Today's Downtime</CardDescription>
+                    <CardTitle className="text-2xl font-mono">{downtimeStats?.summary.todayDowntimeHours.toFixed(1) ?? 0}h</CardTitle>
+                  </CardHeader>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardDescription className="text-xs">Avg Duration</CardDescription>
+                    <CardTitle className="text-2xl font-mono">{downtimeStats?.summary.avgDurationMinutes.toFixed(0) ?? 0}m</CardTitle>
+                  </CardHeader>
+                </Card>
+              </div>
+
+              {/* Charts Row */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Downtime by Category Pie Chart */}
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-lg">Downtime by Category</CardTitle>
+                    <CardDescription className="text-xs">
+                      Distribution of downtime across categories
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="h-64">
+                      {downtimeStats?.byCategory && Object.keys(downtimeStats.byCategory).length > 0 ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={Object.entries(downtimeStats.byCategory).map(([category, data]) => ({
+                                name: category.charAt(0).toUpperCase() + category.slice(1),
+                                value: data.totalMinutes,
+                                count: data.count,
+                              }))}
+                              cx="50%"
+                              cy="50%"
+                              labelLine={false}
+                              outerRadius={80}
+                              fill="#8884d8"
+                              dataKey="value"
+                              label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                            >
+                              {Object.entries(downtimeStats.byCategory).map(([category], index) => (
+                                <Cell key={`cell-${index}`} fill={categoryColors[category] || "#6b7280"} />
+                              ))}
+                            </Pie>
+                            <Tooltip 
+                              formatter={(value: number) => [
+                                `${Math.round(value / 60 * 10) / 10}h`, 
+                                "Duration"
+                              ]} 
+                            />
+                            <Legend />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <div className="flex items-center justify-center h-full text-muted-foreground">
+                          No downtime data available
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Downtime by Machine Bar Chart */}
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-lg">Downtime by Machine</CardTitle>
+                    <CardDescription className="text-xs">
+                      Total downtime hours per machine
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="h-64">
+                      {downtimeStats?.byMachine && Object.keys(downtimeStats.byMachine).length > 0 ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart
+                            data={Object.entries(downtimeStats.byMachine).map(([_, data]) => ({
+                              name: data.machineName,
+                              hours: Math.round(data.totalMinutes / 60 * 10) / 10,
+                              incidents: data.count,
+                            }))}
+                            layout="vertical"
+                            margin={{ top: 5, right: 30, left: 80, bottom: 5 }}
+                          >
+                            <XAxis type="number" />
+                            <YAxis dataKey="name" type="category" width={70} tick={{ fontSize: 12 }} />
+                            <Tooltip 
+                              formatter={(value: number) => [
+                                `${value}h`, 
+                                "Downtime"
+                              ]} 
+                            />
+                            <Bar dataKey="hours" fill="#ef4444" />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <div className="flex items-center justify-center h-full text-muted-foreground">
+                          No downtime data available
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Top Downtime Reasons (Pareto) */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg">Top Downtime Reasons</CardTitle>
+                  <CardDescription className="text-xs">
+                    Most common causes of downtime (Pareto analysis)
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="border-b">
+                        <tr>
+                          <th className="text-left py-2 px-2">Rank</th>
+                          <th className="text-left py-2 px-2">Reason</th>
+                          <th className="text-left py-2 px-2">Category</th>
+                          <th className="text-right py-2 px-2">Incidents</th>
+                          <th className="text-right py-2 px-2">Total Time</th>
+                          <th className="text-right py-2 px-2">% of Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {downtimeStats?.byReasonCode && Object.entries(downtimeStats.byReasonCode)
+                          .sort((a, b) => b[1].totalMinutes - a[1].totalMinutes)
+                          .slice(0, 10)
+                          .map(([code, data], index) => {
+                            const reasonInfo = downtimeReasonCodes[code as keyof typeof downtimeReasonCodes];
+                            const totalMinutes = downtimeStats.summary.totalDowntimeMinutes || 1;
+                            const percentage = ((data.totalMinutes / totalMinutes) * 100).toFixed(1);
+                            return (
+                              <tr key={code} className="border-b hover:bg-muted/50">
+                                <td className="py-2 px-2 font-mono">{index + 1}</td>
+                                <td className="py-2 px-2">{reasonInfo?.label || code}</td>
+                                <td className="py-2 px-2">
+                                  <Badge 
+                                    variant="outline" 
+                                    style={{ borderColor: categoryColors[reasonInfo?.category || "other"] }}
+                                    className="text-xs capitalize"
+                                  >
+                                    {reasonInfo?.category || "other"}
+                                  </Badge>
+                                </td>
+                                <td className="text-right py-2 px-2 font-mono">{data.count}</td>
+                                <td className="text-right py-2 px-2 font-mono">{(data.totalMinutes / 60).toFixed(1)}h</td>
+                                <td className="text-right py-2 px-2 font-mono">{percentage}%</td>
+                              </tr>
+                            );
+                          })}
+                        {(!downtimeStats?.byReasonCode || Object.keys(downtimeStats.byReasonCode).length === 0) && (
+                          <tr>
+                            <td colSpan={6} className="py-4 text-center text-muted-foreground">
+                              No downtime records found
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Downtime History Table */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg">Downtime History</CardTitle>
+                  <CardDescription className="text-xs">
+                    All recorded downtime events
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto max-h-96">
+                    <table className="w-full text-xs">
+                      <thead className="border-b sticky top-0 bg-background">
+                        <tr>
+                          <th className="text-left py-2 px-2">Machine</th>
+                          <th className="text-left py-2 px-2">Reason</th>
+                          <th className="text-left py-2 px-2">Category</th>
+                          <th className="text-left py-2 px-2">Start</th>
+                          <th className="text-left py-2 px-2">End</th>
+                          <th className="text-right py-2 px-2">Duration</th>
+                          <th className="text-left py-2 px-2">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {downtimeLogs.map((log) => {
+                          const machine = machines.find(m => m.id === log.machineId);
+                          const reasonInfo = downtimeReasonCodes[log.reasonCode as keyof typeof downtimeReasonCodes];
+                          const isActive = !log.endTime;
+                          
+                          return (
+                            <tr key={log.id} className="border-b hover:bg-muted/50">
+                              <td className="py-2 px-2 truncate">{machine?.name || "Unknown"}</td>
+                              <td className="py-2 px-2 truncate">{reasonInfo?.label || log.reasonCode}</td>
+                              <td className="py-2 px-2">
+                                <Badge 
+                                  variant="outline" 
+                                  style={{ borderColor: categoryColors[log.reasonCategory] }}
+                                  className="text-xs capitalize"
+                                >
+                                  {log.reasonCategory}
+                                </Badge>
+                              </td>
+                              <td className="py-2 px-2 font-mono whitespace-nowrap">
+                                {new Date(log.startTime).toLocaleString()}
+                              </td>
+                              <td className="py-2 px-2 font-mono whitespace-nowrap">
+                                {log.endTime ? new Date(log.endTime).toLocaleString() : "--"}
+                              </td>
+                              <td className="text-right py-2 px-2 font-mono">
+                                {log.duration ? `${log.duration}m` : (isActive ? "Active" : "--")}
+                              </td>
+                              <td className="py-2 px-2">
+                                <Badge variant={isActive ? "destructive" : "secondary"} className="text-xs">
+                                  {isActive ? "Active" : "Resolved"}
+                                </Badge>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {downtimeLogs.length === 0 && (
+                          <tr>
+                            <td colSpan={7} className="py-4 text-center text-muted-foreground">
+                              No downtime records found
+                            </td>
+                          </tr>
+                        )}
                       </tbody>
                     </table>
                   </div>

@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
-import { insertMachineSchema, insertOperatorSchema, insertMaintenanceLogSchema, machineStatuses, users } from "@shared/schema";
+import { insertMachineSchema, insertOperatorSchema, insertMaintenanceLogSchema, insertDowntimeLogSchema, machineStatuses, users, downtimeCategories } from "@shared/schema";
 import { db } from "./db";
 import { z } from "zod";
 
@@ -363,6 +363,181 @@ export async function registerRoutes(
       res.json({ deleted });
     } catch (error) {
       res.status(500).json({ error: "Failed to bulk delete production stats" });
+    }
+  });
+
+  // === DOWNTIME LOGS ===
+
+  // Get all downtime logs (with optional filters)
+  app.get("/api/downtime", async (req, res) => {
+    try {
+      const { machineId, startDate, endDate } = req.query as Record<string, string | undefined>;
+      let logs = await storage.getDowntimeLogs();
+
+      // Filter by machine if provided
+      if (machineId) {
+        logs = logs.filter(log => log.machineId === machineId);
+      }
+
+      // Filter by date range if provided
+      if (startDate) {
+        logs = logs.filter(log => log.startTime >= startDate);
+      }
+      if (endDate) {
+        logs = logs.filter(log => log.startTime <= endDate);
+      }
+
+      // Sort by startTime descending (most recent first)
+      logs.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
+
+      res.json(logs);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch downtime logs" });
+    }
+  });
+
+  // Get all active (unresolved) downtime
+  app.get("/api/downtime/active", async (_req, res) => {
+    try {
+      const logs = await storage.getActiveDowntimeLogs();
+      res.json(logs);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch active downtime" });
+    }
+  });
+
+  // Get downtime statistics
+  app.get("/api/downtime/stats", async (req, res) => {
+    try {
+      const logs = await storage.getDowntimeLogs();
+      const machines = await storage.getMachines();
+      const machineMap = new Map(machines.map(m => [m.id, m]));
+
+      // Calculate statistics
+      const totalDowntimeMinutes = logs.reduce((sum, log) => sum + (log.duration || 0), 0);
+      const activeDowntime = logs.filter(log => !log.endTime);
+      
+      // Group by reason code
+      const byReasonCode = new Map<string, { count: number; totalMinutes: number }>();
+      logs.forEach(log => {
+        const existing = byReasonCode.get(log.reasonCode) || { count: 0, totalMinutes: 0 };
+        byReasonCode.set(log.reasonCode, {
+          count: existing.count + 1,
+          totalMinutes: existing.totalMinutes + (log.duration || 0),
+        });
+      });
+
+      // Group by category
+      const byCategory = new Map<string, { count: number; totalMinutes: number }>();
+      logs.forEach(log => {
+        const existing = byCategory.get(log.reasonCategory) || { count: 0, totalMinutes: 0 };
+        byCategory.set(log.reasonCategory, {
+          count: existing.count + 1,
+          totalMinutes: existing.totalMinutes + (log.duration || 0),
+        });
+      });
+
+      // Group by machine
+      const byMachine = new Map<string, { count: number; totalMinutes: number; machineName: string }>();
+      logs.forEach(log => {
+        const machine = machineMap.get(log.machineId);
+        const existing = byMachine.get(log.machineId) || { 
+          count: 0, 
+          totalMinutes: 0, 
+          machineName: machine?.name || "Unknown" 
+        };
+        byMachine.set(log.machineId, {
+          count: existing.count + 1,
+          totalMinutes: existing.totalMinutes + (log.duration || 0),
+          machineName: existing.machineName,
+        });
+      });
+
+      // Calculate today's downtime
+      const today = new Date().toISOString().split('T')[0];
+      const todayLogs = logs.filter(log => log.startTime.startsWith(today));
+      const todayDowntimeMinutes = todayLogs.reduce((sum, log) => sum + (log.duration || 0), 0);
+
+      // Average incident duration
+      const completedLogs = logs.filter(log => log.duration !== null);
+      const avgDuration = completedLogs.length > 0
+        ? completedLogs.reduce((sum, log) => sum + (log.duration || 0), 0) / completedLogs.length
+        : 0;
+
+      res.json({
+        summary: {
+          totalIncidents: logs.length,
+          totalDowntimeMinutes,
+          totalDowntimeHours: parseFloat((totalDowntimeMinutes / 60).toFixed(1)),
+          activeIncidents: activeDowntime.length,
+          todayDowntimeMinutes,
+          todayDowntimeHours: parseFloat((todayDowntimeMinutes / 60).toFixed(1)),
+          avgDurationMinutes: parseFloat(avgDuration.toFixed(1)),
+        },
+        byReasonCode: Object.fromEntries(byReasonCode),
+        byCategory: Object.fromEntries(byCategory),
+        byMachine: Object.fromEntries(byMachine),
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch downtime statistics" });
+    }
+  });
+
+  // Get single downtime log
+  app.get("/api/downtime/:id", async (req, res) => {
+    try {
+      const log = await storage.getDowntimeLog(req.params.id);
+      if (!log) {
+        return res.status(404).json({ error: "Downtime log not found" });
+      }
+      res.json(log);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch downtime log" });
+    }
+  });
+
+  // Create downtime log
+  app.post("/api/downtime", async (req, res) => {
+    try {
+      const validatedData = insertDowntimeLogSchema.parse(req.body);
+      const log = await storage.createDowntimeLog(validatedData);
+      res.status(201).json(log);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid downtime data", details: error.errors });
+      }
+      res.status(500).json({ error: "Failed to create downtime log" });
+    }
+  });
+
+  // Update downtime log (for resolving, adding notes, etc.)
+  app.patch("/api/downtime/:id", async (req, res) => {
+    try {
+      const partialSchema = insertDowntimeLogSchema.partial();
+      const validatedData = partialSchema.parse(req.body);
+      const log = await storage.updateDowntimeLog(req.params.id, validatedData);
+      if (!log) {
+        return res.status(404).json({ error: "Downtime log not found" });
+      }
+      res.json(log);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid downtime data", details: error.errors });
+      }
+      res.status(500).json({ error: "Failed to update downtime log" });
+    }
+  });
+
+  // Delete downtime log
+  app.delete("/api/downtime/:id", async (req, res) => {
+    try {
+      const success = await storage.deleteDowntimeLog(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Downtime log not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete downtime log" });
     }
   });
 

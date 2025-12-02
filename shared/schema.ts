@@ -111,3 +111,60 @@ export const productionStats = pgTable("production_stats", {
 export const insertProductionStatSchema = createInsertSchema(productionStats).omit({ id: true, createdAt: true, createdBy: true });
 export type InsertProductionStat = z.infer<typeof insertProductionStatSchema>;
 export type ProductionStat = typeof productionStats.$inferSelect;
+
+// === DOWNTIME TRACKING ===
+
+// Downtime reason categories
+export const downtimeCategories = ["mechanical", "electrical", "material", "operator", "quality", "other"] as const;
+export type DowntimeCategory = typeof downtimeCategories[number];
+
+// Predefined downtime reason codes with their categories
+export const downtimeReasonCodes = {
+  // Mechanical
+  MECH_BREAKDOWN: { category: "mechanical" as const, label: "Machine breakdown" },
+  MECH_TOOLING: { category: "mechanical" as const, label: "Tooling issue/change" },
+  MECH_ADJUSTMENT: { category: "mechanical" as const, label: "Machine adjustment needed" },
+  MECH_JAM: { category: "mechanical" as const, label: "Material jam" },
+  // Electrical
+  ELEC_FAILURE: { category: "electrical" as const, label: "Electrical failure" },
+  ELEC_SENSOR: { category: "electrical" as const, label: "Sensor malfunction" },
+  ELEC_CONTROLS: { category: "electrical" as const, label: "Control system issue" },
+  // Material
+  MAT_SHORTAGE: { category: "material" as const, label: "Material shortage" },
+  MAT_QUALITY: { category: "material" as const, label: "Material quality issue" },
+  MAT_CHANGEOVER: { category: "material" as const, label: "Material changeover" },
+  // Operator
+  OP_BREAK: { category: "operator" as const, label: "Scheduled break" },
+  OP_TRAINING: { category: "operator" as const, label: "Training" },
+  OP_UNAVAILABLE: { category: "operator" as const, label: "Operator unavailable" },
+  OP_MEETING: { category: "operator" as const, label: "Meeting" },
+  // Quality
+  QUAL_INSPECTION: { category: "quality" as const, label: "Quality inspection hold" },
+  QUAL_REWORK: { category: "quality" as const, label: "Rework required" },
+  QUAL_CALIBRATION: { category: "quality" as const, label: "Calibration needed" },
+  // Other
+  OTHER_PLANNED: { category: "other" as const, label: "Planned downtime" },
+  OTHER_UNPLANNED: { category: "other" as const, label: "Unplanned (other)" },
+  OTHER_UTILITIES: { category: "other" as const, label: "Utilities issue (power, air, etc.)" },
+} as const;
+
+export type DowntimeReasonCode = keyof typeof downtimeReasonCodes;
+
+// Downtime logs table
+export const downtimeLogs = pgTable("downtime_logs", {
+  id: varchar("id").primaryKey(),
+  machineId: varchar("machine_id").notNull(),
+  reasonCode: text("reason_code").notNull().$type<DowntimeReasonCode>(),
+  reasonCategory: text("reason_category").notNull().$type<DowntimeCategory>(),
+  description: text("description"),
+  startTime: text("start_time").notNull(),
+  endTime: text("end_time"),
+  duration: integer("duration"), // in minutes
+  reportedBy: text("reported_by"),
+  resolvedBy: text("resolved_by"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const insertDowntimeLogSchema = createInsertSchema(downtimeLogs).omit({ id: true, createdAt: true });
+export type InsertDowntimeLog = z.infer<typeof insertDowntimeLogSchema>;
+export type DowntimeLog = typeof downtimeLogs.$inferSelect;

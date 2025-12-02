@@ -2,6 +2,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { useState, useEffect } from "react";
 import { 
   Play, 
   Pause, 
@@ -15,6 +16,8 @@ import {
   MoreVertical,
   Send,
   Trash2,
+  Timer,
+  CheckCircle,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -22,7 +25,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { Machine, MachineStatus, Operator } from "@shared/schema";
+import type { Machine, MachineStatus, Operator, DowntimeLog } from "@shared/schema";
+import { downtimeReasonCodes } from "@shared/schema";
 
 interface MachineStatusCardProps {
   machine: Machine;
@@ -30,12 +34,15 @@ interface MachineStatusCardProps {
   onStatusChange: (machineId: string, status: MachineStatus) => void;
   onAssignOperator: (machineId: string) => void;
   onLogMaintenance: (machineId: string) => void;
+  onLogDowntime: (machineId: string) => void;
   onEditMachine: (machine: Machine) => void;
   onSubmitStats: (machineId: string) => void;
   onDeleteStats: (machineId: string) => void;
   isSubmittedToday: boolean;
   isPendingSubmit: boolean;
   isPendingDelete: boolean;
+  activeDowntime?: DowntimeLog;
+  onResolveDowntime: (downtimeLog: DowntimeLog) => void;
 }
 
 const statusConfig: Record<MachineStatus, { 
@@ -82,12 +89,15 @@ export function MachineStatusCard({
   onStatusChange,
   onAssignOperator,
   onLogMaintenance,
+  onLogDowntime,
   onEditMachine,
   onSubmitStats,
   onDeleteStats,
   isSubmittedToday,
   isPendingSubmit,
   isPendingDelete,
+  activeDowntime,
+  onResolveDowntime,
 }: MachineStatusCardProps) {
   const status = statusConfig[machine.status];
   const StatusIcon = status.icon;
@@ -95,6 +105,40 @@ export function MachineStatusCard({
   const progressPercent = machine.targetUnits > 0 
     ? Math.min(100, (machine.unitsProduced / machine.targetUnits) * 100) 
     : 0;
+
+  // Live downtime counter
+  const [downtimeDuration, setDowntimeDuration] = useState<string>("");
+  
+  useEffect(() => {
+    if (!activeDowntime) {
+      setDowntimeDuration("");
+      return;
+    }
+
+    const updateDuration = () => {
+      const start = new Date(activeDowntime.startTime).getTime();
+      const now = Date.now();
+      const diffMs = now - start;
+      const minutes = Math.floor(diffMs / 60000);
+      const hours = Math.floor(minutes / 60);
+      const remainingMinutes = minutes % 60;
+      
+      if (hours > 0) {
+        setDowntimeDuration(`${hours}h ${remainingMinutes}m`);
+      } else {
+        setDowntimeDuration(`${minutes}m`);
+      }
+    };
+
+    updateDuration();
+    const interval = setInterval(updateDuration, 60000); // Update every minute
+
+    return () => clearInterval(interval);
+  }, [activeDowntime]);
+
+  const reasonCodeInfo = activeDowntime 
+    ? downtimeReasonCodes[activeDowntime.reasonCode as keyof typeof downtimeReasonCodes]
+    : null;
 
   return (
     <Card 
@@ -140,10 +184,40 @@ export function MachineStatusCard({
               <Wrench className="mr-2 h-4 w-4" />
               Log Maintenance
             </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onLogDowntime(machine.id)} data-testid={`button-log-downtime-${machine.id}`}>
+              <AlertTriangle className="mr-2 h-4 w-4" />
+              Log Downtime
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* Active Downtime Indicator */}
+        {activeDowntime && (
+          <div className="rounded-md bg-machine-down/10 border border-machine-down/30 p-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Timer className="h-4 w-4 text-machine-down animate-pulse" />
+                <span className="text-sm font-medium text-machine-down">Active Downtime</span>
+              </div>
+              <span className="font-mono text-sm font-bold text-machine-down">{downtimeDuration}</span>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1 truncate">
+              {reasonCodeInfo?.label || activeDowntime.reasonCode}
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full mt-2 gap-1.5 text-machine-running border-machine-running/30 hover:bg-machine-running/10"
+              onClick={() => onResolveDowntime(activeDowntime)}
+              data-testid={`button-resolve-downtime-${machine.id}`}
+            >
+              <CheckCircle className="h-3.5 w-3.5" />
+              Resolve Downtime
+            </Button>
+          </div>
+        )}
+
         {/* Operator Section */}
         <div className="flex items-center gap-3">
           {operator ? (
