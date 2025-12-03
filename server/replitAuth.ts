@@ -60,9 +60,14 @@ async function upsertUser(claims: any) {
 }
 
 export async function setupAuth(app: Express) {
-  // Skip auth setup if running locally without Replit environment
+  // Opt-in auth: only enable when explicitly requested
+  // Set ENABLE_AUTH=true and REPL_ID in environments that require OIDC.
+  if (!process.env.ENABLE_AUTH || process.env.ENABLE_AUTH !== "true") {
+    console.log("Auth disabled (ENABLE_AUTH not set to true)");
+    return;
+  }
   if (!process.env.REPL_ID) {
-    console.log("Running without Replit auth (local development mode)");
+    console.log("Auth disabled (REPL_ID missing)");
     return;
   }
 
@@ -136,8 +141,8 @@ export async function setupAuth(app: Express) {
 }
 
 export const isAuthenticated: RequestHandler = async (req, res, next) => {
-  // Skip auth check if running locally
-  if (!process.env.REPL_ID) {
+  // Skip auth check when not enabled
+  if (!process.env.ENABLE_AUTH || process.env.ENABLE_AUTH !== "true" || !process.env.REPL_ID) {
     return next();
   }
 
