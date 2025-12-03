@@ -13,6 +13,20 @@ export async function registerRoutes(
   // Setup Replit Auth
   await setupAuth(app);
 
+  // Simple health endpoint to verify running build and DB connectivity
+  app.get("/api/health", async (_req, res) => {
+    try {
+      const start = Date.now();
+      // Light query to confirm DB responds
+      const machines = await storage.getMachines();
+      const duration = Date.now() - start;
+      res.setHeader("Cache-Control", "no-store");
+      res.json({ ok: true, machinesSample: machines.slice(0, 2).map(m => ({ id: m.id, name: m.name })), dbLatencyMs: duration });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: "DB check failed" });
+    }
+  });
+
   // === AUTH ROUTES ===
 
   // Get current user endpoint (protected)
@@ -346,7 +360,31 @@ export async function registerRoutes(
   // Update downtime log (e.g., resolve by setting endTime)
   app.patch("/api/downtime/:id", async (req, res) => {
     try {
-      const partialSchema = (await import("@shared/schema")).insertDowntimeLogSchema.partial();
+      // Build a partial schema manually because refined ZodEffects doesn't support .partial()
+      const partialSchema = z.object({
+        machineId: z.string().optional(),
+        reasonCode: z.string().optional(),
+        reasonCategory: z.string().optional(),
+        description: z.string().optional(),
+        startTime: z.string().optional(),
+        endTime: z.string().optional(),
+        duration: z.number().optional(),
+        reportedBy: z.string().optional(),
+        resolvedBy: z.string().optional(),
+      }).refine(
+        (data) => !data.startTime || new Date(data.startTime).getTime() <= Date.now(),
+        { message: "Start time cannot be in the future", path: ["startTime"] }
+      ).refine(
+        (data) => !data.endTime || new Date(data.endTime).getTime() <= Date.now(),
+        { message: "End time cannot be in the future", path: ["endTime"] }
+      ).refine(
+        (data) => {
+          if (!data.startTime || !data.endTime) return true;
+          return new Date(data.endTime).getTime() >= new Date(data.startTime).getTime();
+        },
+        { message: "End time must be after start time", path: ["endTime"] }
+      );
+
       const validated = partialSchema.parse(req.body);
       const updated = await storage.updateDowntimeLog(req.params.id, validated);
       if (!updated) {
@@ -371,6 +409,32 @@ export async function registerRoutes(
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to delete downtime log" });
+    }
+  });
+
+  // Clear all downtime logs (bulk delete)
+  app.delete("/api/downtime/all", async (_req, res) => {
+    try {
+      const before = await storage.getDowntimeLogs();
+      const deleted = await storage.clearAllDowntimeLogs();
+      const after = await storage.getDowntimeLogs();
+      console.log("Clear downtime logs:", { beforeCount: before.length, deleted, afterCount: after.length });
+      res.setHeader("Cache-Control", "no-store");
+      res.json({ success: true, deleted, remaining: after.length });
+    } catch (error) {
+      console.error("Failed to clear downtime logs:", error);
+      res.status(500).json({ error: "Failed to clear downtime logs" });
+    }
+  });
+
+  // Downtime count health check
+  app.get("/api/downtime/count", async (_req, res) => {
+    try {
+      const logs = await storage.getDowntimeLogs();
+      res.setHeader("Cache-Control", "no-store");
+      res.json({ count: logs.length });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch downtime count" });
     }
   });
 
@@ -599,7 +663,30 @@ export async function registerRoutes(
   // Update downtime log (for resolving, adding notes, etc.)
   app.patch("/api/downtime/:id", async (req, res) => {
     try {
-      const partialSchema = insertDowntimeLogSchema.partial();
+      const partialSchema = z.object({
+        machineId: z.string().optional(),
+        reasonCode: z.string().optional(),
+        reasonCategory: z.string().optional(),
+        description: z.string().optional(),
+        startTime: z.string().optional(),
+        endTime: z.string().optional(),
+        duration: z.number().optional(),
+        reportedBy: z.string().optional(),
+        resolvedBy: z.string().optional(),
+      }).refine(
+        (data) => !data.startTime || new Date(data.startTime).getTime() <= Date.now(),
+        { message: "Start time cannot be in the future", path: ["startTime"] }
+      ).refine(
+        (data) => !data.endTime || new Date(data.endTime).getTime() <= Date.now(),
+        { message: "End time cannot be in the future", path: ["endTime"] }
+      ).refine(
+        (data) => {
+          if (!data.startTime || !data.endTime) return true;
+          return new Date(data.endTime).getTime() >= new Date(data.startTime).getTime();
+        },
+        { message: "End time must be after start time", path: ["endTime"] }
+      );
+
       const validatedData = partialSchema.parse(req.body);
       const log = await storage.updateDowntimeLog(req.params.id, validatedData);
       if (!log) {

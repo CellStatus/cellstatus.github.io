@@ -497,6 +497,17 @@ export class DatabaseStorage implements IStorage {
     return true;
   }
 
+  async clearAllDowntimeLogs(): Promise<number> {
+    // Use Neon pool directly to ensure execution
+    const { pool } = await import("./db");
+    const beforeRes = await pool.query("SELECT id FROM downtime_logs");
+    const beforeCount = beforeRes.rowCount ?? beforeRes.rows.length;
+    await pool.query("DELETE FROM downtime_logs");
+    const afterRes = await pool.query("SELECT id FROM downtime_logs");
+    const afterCount = afterRes.rowCount ?? afterRes.rows.length;
+    return beforeCount - afterCount;
+  }
+
   // Events
   async getEvents(): Promise<EventEntity[]> {
     return await db.select().from(events);

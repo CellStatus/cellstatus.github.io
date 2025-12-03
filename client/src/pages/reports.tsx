@@ -198,6 +198,17 @@ export default function Reports() {
     staleTime: 0,
   });
 
+  const deleteDowntimeMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiRequest("DELETE", `/api/downtime/${id}`);
+      try { await res.json(); } catch {}
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/downtime"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/downtime/stats"] });
+    },
+  });
+
   // Form state for creating a new production stat
   const [form, setForm] = useState({
     machineId: "",
@@ -497,7 +508,8 @@ export default function Reports() {
             </div>
             {/* Downtime Section */}
             <div className="space-y-4 mt-6">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 flex-1">
                 <Card>
                   <CardHeader className="pb-2">
                     <CardDescription className="text-xs">Total Downtime Incidents</CardDescription>
@@ -522,6 +534,8 @@ export default function Reports() {
                     <CardTitle className="text-2xl font-mono">{downtimeStats?.summary.avgDurationMinutes.toFixed(0) ?? 0}m</CardTitle>
                   </CardHeader>
                 </Card>
+                </div>
+                {/* Clear-all button removed as requested */}
               </div>
               {/* Downtime Summary */}
               <Card>
@@ -539,6 +553,7 @@ export default function Reports() {
                           <th className="text-left py-2 px-2">End</th>
                           <th className="text-right py-2 px-2">Duration</th>
                           <th className="text-left py-2 px-2">Reason</th>
+                          <th className="text-right py-2 px-2">Actions</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -558,6 +573,19 @@ export default function Reports() {
                                   <td className="py-2 px-2 truncate">{end ? end.toLocaleString() : "Active"}</td>
                                   <td className="text-right py-2 px-2 tabular-nums">{durationMin != null ? `${durationMin}m` : "—"}</td>
                                   <td className="py-2 px-2 truncate capitalize">{log.reasonCode}</td>
+                                  <td className="text-right py-2 px-2">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 px-2 gap-1"
+                                      onClick={() => deleteDowntimeMutation.mutate(log.id)}
+                                      disabled={deleteDowntimeMutation.isPending}
+                                      title="Delete this downtime log"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                      Delete
+                                    </Button>
+                                  </td>
                                 </tr>
                               );
                             })
