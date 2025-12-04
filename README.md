@@ -2,8 +2,6 @@
 
 A modern, real-time manufacturing cell status tracking application built for production floor teams. Monitor machines, track production metrics, manage operator assignments, and log downtime incidents—all in one intuitive dashboard.
 
-![Live Demo](https://rwaynewhite15.github.io/CellStatus/)
-
 ---
 
 ## 📸 Screenshots
@@ -24,15 +22,31 @@ A modern, real-time manufacturing cell status tracking application built for pro
 ![Production Tab Screenshot](./screenshots/production-tab.png)
 *Log and review production statistics by shift and date*
 
+### Event Cards and Team Collaboration
+![Production Tab Screenshot](./screenshots/events.png)
+*Document events and assign tasks for team collaboration*
+
 ---
 
 ## ✨ Key Features
 
-### 🎯 Real-Time Dashboard
+### 🎯 Dashboard
 - **Live Status Cards**: Color-coded machine status at a glance (Running, Idle, Down, Maintenance, Setup)
 - **Shift Management**: Track production across Day, Afternoon, and Midnight shifts
 - **Summary Metrics**: Instant view of total running/idle/down machines, units produced, and average efficiency
 - **Active Downtime Tracking**: See live downtime duration for machines currently down
+
+### 🗓️ Events & Team Collaboration
+- **Event Creation**: Create events to organize team efforts around specific issues or projects
+- **Task Management**: Break down events into actionable tasks with:
+  - Task titles and descriptions
+  - Start and end dates for scheduling
+  - Status tracking (Not Started, In Progress, Completed, Blocked)
+  - Assignee selection from your operator roster
+- **Team Assignments**: Add multiple team members (operators) to events for coordinated collaboration
+- **Issue Tracking**: Link events to specific problems or improvements, keeping all related tasks and team members organized in one place
+- **Timeline View**: Track task progress with clear start/end dates and status indicators
+- **Collaborative Workflow**: Enable cross-functional teams to work together on maintenance issues, improvement projects, or production challenges
 
 ### 🏭 Machine Management
 - **Machine Cards**: Visual cards showing:
@@ -176,53 +190,6 @@ A modern, real-time manufacturing cell status tracking application built for pro
 
 ---
 
-## 📂 Project Structure
-
-```
-CellStatus/
-├── client/                   # React frontend
-│   ├── src/
-│   │   ├── components/       # Reusable UI components
-│   │   │   ├── ui/           # Shadcn UI components
-│   │   │   ├── machine-status-card.tsx
-│   │   │   ├── machine-dialog.tsx
-│   │   │   ├── maintenance-dialog.tsx
-│   │   │   ├── operator-dialog.tsx
-│   │   │   └── ...
-│   │   ├── pages/            # Route pages
-│   │   │   ├── dashboard.tsx # Main dashboard
-│   │   │   ├── machines.tsx  # Machine management
-│   │   │   ├── operators.tsx # Operator management
-│   │   │   ├── maintenance.tsx
-│   │   │   └── reports.tsx   # Reports & analytics
-│   │   ├── hooks/            # Custom React hooks
-│   │   └── lib/              # Utilities and API client
-│   └── public/               # Static assets
-├── server/                   # Express backend
-│   ├── index.ts              # Server entry and middleware
-│   ├── routes.ts             # API route handlers
-│   ├── storage.ts            # Database operations
-│   ├── db.ts                 # Database connection
-│   └── auth.ts               # Authentication (optional)
-├── shared/                   # Shared TypeScript types
-│   └── schema.ts             # Database schema & Zod validators
-└── .github/workflows/        # CI/CD for GitHub Pages
-```
-
----
-
-## 🎨 Color-Coded Status System
-
-| Status | Color | Meaning |
-|--------|-------|---------|
-| 🟢 **Running** | Green | Machine actively producing |
-| 🟡 **Idle** | Yellow | Machine waiting for work/operator |
-| 🔴 **Down** | Red | Machine experiencing downtime |
-| 🔵 **Maintenance** | Blue | Scheduled or active maintenance |
-| 🟣 **Setup** | Purple | Machine being set up for production |
-
----
-
 ## 🔒 Security Features
 
 - ✅ **CORS Protection**: Whitelist-based origin control
@@ -232,84 +199,6 @@ CellStatus/
 - ✅ **HTTPS Enforced**: Secure communication in production
 - ✅ **No-Cache Headers**: Prevent stale data issues
 
----
-
-## 📱 Usage
-
-### Dashboard Workflow
-1. **Select Shift**: Choose Day, Afternoon, or Midnight shift from the dropdown
-2. **Monitor Machines**: View real-time status cards for all equipment
-3. **Take Actions**:
-   - Click status dropdown to change machine state
-   - Click "Assign Operator" to link an operator to a machine
-   - Click "Log Maintenance" to record maintenance activities
-   - Click "Log Downtime" to document incidents
-   - Click "Submit Stats" to log production data for the current shift
-4. **Review Metrics**: Check summary stats at the top (running count, units, efficiency, active downtime)
-
-### Reports Workflow
-1. Navigate to the **Reports** page
-2. **Overview Tab**:
-   - Review machine status summary
-   - Check maintenance logs
-   - Drill into machine history (production stats + maintenance per machine)
-   - Analyze downtime incidents with delete capability
-3. **Production Tab**:
-   - Create new production stat entries manually
-   - Review all historical production data
-   - Delete incorrect entries
-
-### Machine Management
-1. Go to **Machines** page
-2. View all machines in a table format
-3. **Add Machine**: Click "Add Machine" and fill in name, machine ID, target units
-4. **Edit Machine**: Click edit icon on any row
-5. **Delete Machine**: Click trash icon (confirms before deletion)
-
-### Operator Management
-1. Go to **Operators** page
-2. Add operators with name, shift, and status
-3. Assign operators to machines from the Dashboard
-
----
-
-## 🌍 Deployment
-
-### Production Environment Variables
-
-**Backend (`server/.env` on Render)**
-```env
-DATABASE_URL=postgresql://...
-SESSION_SECRET=your-production-secret
-NODE_ENV=production
-ENABLE_AUTH=false  # Set to true if using Replit OIDC auth
-```
-
-**Frontend (`client/.env.production`)**
-```env
-VITE_API_BASE_URL=https://your-backend.onrender.com
-```
-
-### Deployment Steps
-1. **Database**: Create PostgreSQL database on [Neon](https://neon.tech)
-2. **Backend**: Deploy to Render as a Node.js web service, set environment variables
-3. **Frontend**: Automatic deployment via GitHub Actions on push to `main` branch
-
----
-
-## 🐛 Troubleshooting
-
-**Problem**: CORS errors when accessing API  
-**Solution**: Ensure your frontend URL is in the `allowedOrigins` array in `server/index.ts`
-
-**Problem**: Database connection failed  
-**Solution**: Verify `DATABASE_URL` is correct and Neon project is active (free tier pauses after inactivity)
-
-**Problem**: Production stats not showing  
-**Solution**: Check that you've selected the correct shift and date; stats are shift-specific
-
-**Problem**: Render service not responding  
-**Solution**: Free tier sleeps after 15 minutes; first request may take 20-30 seconds to wake
 
 ---
 
