@@ -56,6 +56,10 @@ export default function MachinesPage() {
     queryKey: ["/api/machines"],
   });
 
+  const { data: downtimeLogs = [] } = useQuery<any[]>({
+    queryKey: ["/api/downtime"],
+  });
+
   const createMutation = useMutation({
     mutationFn: (data: Partial<Machine>) => apiRequest("POST", "/api/machines", data),
     onSuccess: () => {
@@ -168,8 +172,10 @@ export default function MachinesPage() {
                     <TableHead>Machine</TableHead>
                     <TableHead>ID</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Production</TableHead>
-                    <TableHead className="text-right">Efficiency</TableHead>
+                    <TableHead className="text-right">Good Parts</TableHead>
+                    <TableHead className="text-right">Scrap Parts</TableHead>
+                    <TableHead className="text-right">Run Time (hrs)</TableHead>
+                    <TableHead className="text-right">OEE</TableHead>
                     <TableHead className="w-[100px]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -177,6 +183,37 @@ export default function MachinesPage() {
                   {machines.map((machine) => {
                     const status = statusConfig[machine.status];
                     const StatusIcon = status.icon;
+                    
+                    // Calculate actual runtime: 420 minutes (shift) - downtime
+                    const machineDowntime = downtimeLogs
+                      .filter((log) => log.machineId === machine.id)
+                      .reduce((sum, log) => sum + (log.duration || 0), 0);
+                    const actualRuntime = 420 - machineDowntime;
+                    
+                    // Calculate OEE using APQ (Availability × Performance × Quality)
+                    let oee: number | null = null;
+                    if (machine.idealCycleTime && actualRuntime > 0) {
+                      const totalParts = (machine.goodPartsRan || 0) + (machine.scrapParts || 0);
+                      
+                      // Availability = Actual Runtime / Planned Runtime (420 min)
+                      const availability = actualRuntime / 420;
+                      
+                      // Performance = (Actual Output × Ideal Cycle Time) / Actual Runtime
+                      // Convert runtime to seconds to match cycle time units
+                      const actualRuntimeSeconds = actualRuntime * 60;
+                      const performance = totalParts > 0 
+                        ? ((totalParts * machine.idealCycleTime) / actualRuntimeSeconds) 
+                        : 0;
+                      
+                      // Quality = Good Parts / Total Parts
+                      const quality = totalParts > 0 
+                        ? (machine.goodPartsRan || 0) / totalParts 
+                        : 0;
+                      
+                      // OEE = Availability × Performance × Quality × 100
+                      oee = availability * performance * quality * 100;
+                    }
+                    
                     return (
                       <TableRow key={machine.id} data-testid={`row-machine-${machine.id}`}>
                         <TableCell className="font-medium">{machine.name}</TableCell>
@@ -192,10 +229,16 @@ export default function MachinesPage() {
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right font-mono">
-                          {machine.unitsProduced} / {machine.targetUnits}
+                          {machine.goodPartsRan || 0}
                         </TableCell>
                         <TableCell className="text-right font-mono">
-                          {machine.efficiency ? `${machine.efficiency.toFixed(0)}%` : "--"}
+                          {machine.scrapParts || 0}
+                        </TableCell>
+                        <TableCell className="text-right font-mono">
+                          {(actualRuntime / 60).toFixed(1)}
+                        </TableCell>
+                        <TableCell className="text-right font-mono">
+                          {oee !== null ? `${oee.toFixed(1)}%` : "--"}
                         </TableCell>
                         <TableCell>
                           <div className="flex gap-1">

@@ -3,9 +3,11 @@ import {
   LayoutDashboard,
   Wrench,
   Users,
-  Settings,
   Factory,
   BarChart3,
+  AlertTriangle,
+  Trash2,
+  TrendingUp,
 } from "lucide-react";
 import {
   Sidebar,
@@ -27,14 +29,14 @@ const navItems = [
     icon: LayoutDashboard,
   },
   {
+    title: "Machines",
+    url: "/machines",
+    icon: Factory,
+  },
+  {
     title: "Events",
     url: "/events",
     icon: LayoutDashboard,
-  },
-  {
-    title: "Machines",
-    url: "/machines",
-    icon: Settings,
   },
   {
     title: "Team Members",
@@ -45,6 +47,16 @@ const navItems = [
     title: "Maintenance",
     url: "/maintenance",
     icon: Wrench,
+  },
+  {
+    title: "Production Stats",
+    url: "/production-stats",
+    icon: TrendingUp,
+  },
+  {
+    title: "Downtime Incidents",
+    url: "/downtime",
+    icon: AlertTriangle,
   },
   {
     title: "Reports",

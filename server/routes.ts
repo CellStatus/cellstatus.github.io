@@ -100,15 +100,19 @@ export async function registerRoutes(
   // Update machine
   app.patch("/api/machines/:id", async (req, res) => {
     try {
+      console.log("PATCH /api/machines/:id - Received data:", req.body);
       const partialSchema = insertMachineSchema.partial();
       const validatedData = partialSchema.parse(req.body);
+      console.log("Validated data:", validatedData);
       const operatorId = req.operatorId;
       const machine = await storage.updateMachine(req.params.id, validatedData, operatorId);
+      console.log("Updated machine:", machine);
       if (!machine) {
         return res.status(404).json({ error: "Machine not found" });
       }
       res.json(machine);
     } catch (error) {
+      console.error("Update error:", error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: "Invalid machine data", details: error.errors });
       }
@@ -480,20 +484,33 @@ export async function registerRoutes(
     try {
       const { insertProductionStatSchema } = await import("@shared/schema");
       const validatedData = insertProductionStatSchema.parse(req.body);
+      // Ensure all NOT NULL fields are numbers (never null/undefined)
+      const safeStat = {
+        ...validatedData,
+        goodPartsRan: typeof validatedData.goodPartsRan === "number" && Number.isFinite(validatedData.goodPartsRan) ? validatedData.goodPartsRan : 0,
+        scrapParts: typeof validatedData.scrapParts === "number" && Number.isFinite(validatedData.scrapParts) ? validatedData.scrapParts : 0,
+        idealCycleTime: typeof validatedData.idealCycleTime === "number" && Number.isFinite(validatedData.idealCycleTime) ? validatedData.idealCycleTime : 0,
+        downtime: typeof validatedData.downtime === "number" && Number.isFinite(validatedData.downtime) ? validatedData.downtime : 0,
+        oee: typeof validatedData.oee === "number" && Number.isFinite(validatedData.oee) ? validatedData.oee : 0,
+        availability: typeof validatedData.availability === "number" && Number.isFinite(validatedData.availability) ? validatedData.availability : 0,
+        performance: typeof validatedData.performance === "number" && Number.isFinite(validatedData.performance) ? validatedData.performance : 0,
+        quality: typeof validatedData.quality === "number" && Number.isFinite(validatedData.quality) ? validatedData.quality : 0,
+      };
       // Prefer the operator currently assigned to the machine; fall back to authenticated user
       let operatorId = req.operatorId as string | undefined;
       try {
         const m = await storage.getMachine(validatedData.machineId);
         if (m?.operatorId) operatorId = m.operatorId;
       } catch {}
-      const stat = await storage.createProductionStat(validatedData, operatorId);
+      const stat = await storage.createProductionStat(safeStat, operatorId);
       res.status(201).json(stat);
     } catch (error) {
+      console.error("Production stat error:", error); // <-- Add this line
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: "Invalid production stat data", details: error.errors });
       }
       res.status(500).json({ error: "Failed to create production stat" });
-    }
+      }
   });
 
   // Delete production stat
@@ -771,10 +788,14 @@ export async function registerRoutes(
             id: stat.id,
             date: stat.date,
             shift: stat.shift,
-            unitsProduced: stat.unitsProduced,
-            targetUnits: stat.targetUnits,
+            goodPartsRan: stat.goodPartsRan,
+            scrapParts: stat.scrapParts,
+            idealCycleTime: stat.idealCycleTime,
             downtime: stat.downtime,
-            efficiency: stat.efficiency,
+            oee: stat.oee,
+            availability: stat.availability,
+            performance: stat.performance,
+            quality: stat.quality,
             createdAt: stat.createdAt,
             createdBy: stat.createdBy ? operatorMap.get(stat.createdBy)?.name : "System",
           }));
@@ -935,34 +956,41 @@ export async function registerRoutes(
         const day = String(d.getDate()).padStart(2, "0");
         return `${y}-${m}-${day}`;
       })();
+      console.log("[DEBUG] All filteredStats:", filteredStats.map(s => ({ id: s.id, machineId: s.machineId, oee: s.oee, createdAt: s.createdAt })));
       const machineLogs = machines.map(machine => {
         const machineStats = filteredStats.filter(s => s.machineId === machine.id);
+        console.log(`[DEBUG] Machine ${machine.id} (${machine.name}) stats count:`, machineStats.length, 'OEE:', machineStats.map(s => s.oee));
+
+        // Calculate average OEE from production stats
+        const statOEEs = machineStats
+          .map(s => s.oee)
+          .filter((e): e is number => typeof e === "number" && isFinite(e));
+        const avgOEE = statOEEs.length > 0
+          ? statOEEs.reduce((sum, e) => sum + e, 0) / statOEEs.length
+          : null;
 
         // Use only non-null efficiency values from stats
         const statEffs = machineStats
           .map(s => s.efficiency)
           .filter((e): e is number => typeof e === "number");
-
         const avgFromStats = statEffs.length > 0
           ? statEffs.reduce((sum, e) => sum + e, 0) / statEffs.length
           : null;
 
         // Use machine fallbacks unconditionally (no explicit date filtering)
         const useFallbacks = true;
-
         const fallbackEff = typeof machine.efficiency === "number"
           ? machine.efficiency
           : (machine.targetUnits && machine.targetUnits > 0
               ? (machine.unitsProduced / machine.targetUnits) * 100
               : 0);
-
         const avgEfficiency = avgFromStats ?? (useFallbacks ? fallbackEff : 0);
 
         // If no stats rows, show 0 when filtering explicitly; else sum from stats or fallback to machine units
         const totalUnits = machineStats.length > 0
           ? machineStats.reduce((sum, s) => sum + s.unitsProduced, 0)
           : (useFallbacks ? machine.unitsProduced : 0);
-        
+
         // Get list of shifts that have submitted for today's local date (YYYY-MM-DD)
         const completedShifts = stats
           .filter(s => s.machineId === machine.id && s.date === todayLocalYMD)
@@ -975,6 +1003,8 @@ export async function registerRoutes(
           operatorName: machine.operatorId ? operatorMap.get(machine.operatorId)?.name : "Unassigned",
           statsCount: machineStats.length,
           totalUnitsProduced: totalUnits,
+          avgOEE: statOEEs.length > 0 ? (avgOEE * 100).toFixed(1) : "--",
+          rawAvgOEE: avgOEE, // for debugging
           avgEfficiency: avgEfficiency.toFixed(1),
           completedShifts,
           createdAt: machine.createdAt,
@@ -1050,6 +1080,7 @@ export async function registerRoutes(
         createdBy: log.createdBy ? (userMap.get(log.createdBy)?.email || userMap.get(log.createdBy)?.firstName || "Unknown") : "System",
       }));
 
+      console.log("[DEBUG] machineLogs:", JSON.stringify(machineLogs, null, 2));
       res.json({ 
         data: reportData,
         machineLogs,

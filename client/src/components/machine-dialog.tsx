@@ -33,10 +33,6 @@ const machineFormSchema = z.object({
   name: z.string().min(1, "Machine name is required"),
   machineId: z.string().min(1, "Machine ID is required"),
   status: z.enum(["running", "idle", "maintenance", "down", "setup"]),
-  targetUnits: z.coerce.number().min(0, "Target must be 0 or greater"),
-  unitsProduced: z.coerce.number().min(0, "Units must be 0 or greater"),
-  cycleTime: z.coerce.number().min(0).optional().nullable(),
-  efficiency: z.coerce.number().min(0).max(100).optional().nullable(),
 });
 
 type MachineFormValues = z.infer<typeof machineFormSchema>;
@@ -64,10 +60,6 @@ export function MachineDialog({
       name: "",
       machineId: "",
       status: "idle",
-      targetUnits: 100,
-      unitsProduced: 0,
-      cycleTime: null,
-      efficiency: null,
     },
   });
 
@@ -78,20 +70,12 @@ export function MachineDialog({
           name: machine.name,
           machineId: machine.machineId,
           status: machine.status,
-          targetUnits: machine.targetUnits,
-          unitsProduced: machine.unitsProduced,
-          cycleTime: machine.cycleTime ?? null,
-          efficiency: machine.efficiency ?? null,
         });
       } else {
         form.reset({
           name: "",
           machineId: "",
           status: "idle",
-          targetUnits: 100,
-          unitsProduced: 0,
-          cycleTime: null,
-          efficiency: null,
         });
       }
     }
@@ -178,94 +162,6 @@ export function MachineDialog({
                 </FormItem>
               )}
             />
-
-            <div className="grid grid-cols-2 gap-4">
-              <FormField
-                control={form.control}
-                name="targetUnits"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Target Units</FormLabel>
-                    <FormControl>
-                      <Input 
-                        type="number" 
-                        placeholder="100" 
-                        {...field} 
-                        className="font-mono"
-                        data-testid="input-target-units"
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="unitsProduced"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Units Produced</FormLabel>
-                    <FormControl>
-                      <Input 
-                        type="number" 
-                        placeholder="0" 
-                        {...field} 
-                        className="font-mono"
-                        data-testid="input-units-produced"
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <FormField
-                control={form.control}
-                name="cycleTime"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Cycle Time (sec)</FormLabel>
-                    <FormControl>
-                      <Input 
-                        type="number" 
-                        step="0.1"
-                        placeholder="--" 
-                        {...field} 
-                        value={field.value ?? ""}
-                        onChange={(e) => field.onChange(e.target.value ? parseFloat(e.target.value) : null)}
-                        className="font-mono"
-                        data-testid="input-cycle-time"
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="efficiency"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Efficiency (%)</FormLabel>
-                    <FormControl>
-                      <Input 
-                        type="number" 
-                        step="1"
-                        placeholder="--" 
-                        {...field} 
-                        value={field.value ?? ""}
-                        onChange={(e) => field.onChange(e.target.value ? parseFloat(e.target.value) : null)}
-                        className="font-mono"
-                        data-testid="input-efficiency"
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
 
             <div className="flex justify-end gap-3 pt-4">
               <Button

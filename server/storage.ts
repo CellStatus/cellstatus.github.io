@@ -165,23 +165,34 @@ export class DatabaseStorage implements IStorage {
     if (!machine) return undefined;
 
     const now = new Date().toISOString();
+    
+    // Build update object carefully, preserving existing values for fields not being updated
+    const goodPartsRanValue = updates.goodPartsRan !== undefined ? updates.goodPartsRan : machine.goodPartsRan;
+    const scrapPartsValue = updates.scrapParts !== undefined ? updates.scrapParts : machine.scrapParts;
+    const idealCycleTimeValue = updates.idealCycleTime !== undefined ? updates.idealCycleTime : machine.idealCycleTime;
+    
+    console.log('[updateMachine] About to set OEE fields:', { goodPartsRan: goodPartsRanValue, scrapParts: scrapPartsValue, idealCycleTime: idealCycleTimeValue });
+    
     await db.update(machines)
       .set({
         name: updates.name ?? machine.name,
         machineId: updates.machineId ?? machine.machineId,
         status: (updates.status ?? machine.status) as MachineStatus,
-        operatorId: updates.operatorId !== undefined ? updates.operatorId : machine.operatorId,
-        unitsProduced: updates.unitsProduced ?? machine.unitsProduced,
-        targetUnits: updates.targetUnits ?? machine.targetUnits,
-        cycleTime: updates.cycleTime ?? machine.cycleTime,
-        efficiency: updates.efficiency ?? machine.efficiency,
+        operatorId: updates.operatorId ?? machine.operatorId,
+        statusUpdate: updates.statusUpdate ?? machine.statusUpdate,
+        idealCycleTime: idealCycleTimeValue,
+        goodPartsRan: goodPartsRanValue,
+        scrapParts: scrapPartsValue,
         lastUpdated: `Updated at ${now}`,
         updatedAt: now,
         updatedBy: operatorId ?? null,
       })
       .where(eq(machines.id, id));
 
-    return (await this.getMachine(id))!;
+    const updated = await this.getMachine(id);
+    console.log('[updateMachine] Verification after update:', { id: updated?.id, idealCycleTime: updated?.idealCycleTime, goodPartsRan: updated?.goodPartsRan, scrapParts: updated?.scrapParts });
+    
+    return updated!;
   }
 
   async updateMachineStatus(id: string, status: MachineStatus, operatorId?: string): Promise<Machine | undefined> {
@@ -396,10 +407,14 @@ export class DatabaseStorage implements IStorage {
       machineId: stat.machineId,
       shift: stat.shift,
       date: stat.date,
-      unitsProduced: stat.unitsProduced,
-      targetUnits: stat.targetUnits,
-      downtime: stat.downtime ?? 0,
-      efficiency: stat.efficiency ?? null,
+      goodPartsRan: typeof stat.goodPartsRan === "number" && Number.isFinite(stat.goodPartsRan) ? stat.goodPartsRan : 0,
+      scrapParts: typeof stat.scrapParts === "number" && Number.isFinite(stat.scrapParts) ? stat.scrapParts : 0,
+      idealCycleTime: typeof stat.idealCycleTime === "number" && Number.isFinite(stat.idealCycleTime) ? stat.idealCycleTime : 0,
+      downtime: typeof stat.downtime === "number" && Number.isFinite(stat.downtime) ? stat.downtime : 0,
+      oee: typeof stat.oee === "number" && Number.isFinite(stat.oee) ? stat.oee : 0,
+      availability: typeof stat.availability === "number" && Number.isFinite(stat.availability) ? stat.availability : 0,
+      performance: typeof stat.performance === "number" && Number.isFinite(stat.performance) ? stat.performance : 0,
+      quality: typeof stat.quality === "number" && Number.isFinite(stat.quality) ? stat.quality : 0,
       createdAt: now,
       createdBy: operatorId ?? null,
     });

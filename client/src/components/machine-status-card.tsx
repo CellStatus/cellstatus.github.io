@@ -3,6 +3,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Textarea } from "@/components/ui/textarea";
+import { 
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useState, useEffect } from "react";
 import { 
   Play, 
@@ -31,6 +38,7 @@ import { downtimeReasonCodes } from "@shared/schema";
 interface MachineStatusCardProps {
   machine: Machine;
   operator?: Operator;
+  downtimeLogs?: DowntimeLog[];
   onStatusChange: (machineId: string, status: MachineStatus) => void;
   onAssignOperator: (machineId: string) => void;
   onLogMaintenance: (machineId: string) => void;
@@ -88,6 +96,7 @@ const statusConfig: Record<MachineStatus, {
 export function MachineStatusCard({
   machine,
   operator,
+  downtimeLogs = [],
   onStatusChange,
   onAssignOperator,
   onLogMaintenance,
@@ -105,16 +114,53 @@ export function MachineStatusCard({
 }: MachineStatusCardProps) {
   const status = statusConfig[machine.status];
   const StatusIcon = status.icon;
-  const progressPercent = machine.targetUnits > 0 
-    ? Math.min(100, (machine.unitsProduced / machine.targetUnits) * 100) 
-    : 0;
+  
+  // Calculate OEE with downtime-based runtime using APQ
+  const machineDowntime = downtimeLogs
+    .filter((log) => log.machineId === machine.id)
+    .reduce((sum, log) => sum + (log.duration || 0), 0);
+  const actualRuntime = 420 - machineDowntime;
+  
+  let oee: number | null = null;
+  // Calculate OEE metrics with proper unit conversion
+  if (machine.idealCycleTime && actualRuntime > 0) {
+    const totalParts = (machine.goodPartsRan || 0) + (machine.scrapParts || 0);
+    
+    // Availability = Actual Runtime / Planned Runtime (420 min)
+    const availability = actualRuntime / 420;
+    
+    // Performance = (Actual Output × Ideal Cycle Time) / Actual Runtime
+    // Convert runtime to seconds to match cycle time units
+    const actualRuntimeSeconds = actualRuntime * 60;
+    const performance = totalParts > 0 
+      ? ((totalParts * machine.idealCycleTime) / actualRuntimeSeconds) 
+      : 0;
+    
+    // Quality = Good Parts / Total Parts
+    const quality = totalParts > 0 
+      ? (machine.goodPartsRan || 0) / totalParts 
+      : 0;
+    
+    // OEE = Availability × Performance × Quality × 100
+    oee = availability * performance * quality * 100;
+  }
   
   const [statusUpdate, setStatusUpdate] = useState(machine.statusUpdate || "");
   const [isEditingStatus, setIsEditingStatus] = useState(false);
+  const [editingOeeMetrics, setEditingOeeMetrics] = useState(false);
+  const [editGoodParts, setEditGoodParts] = useState(machine.goodPartsRan?.toString() || "0");
+  const [editScrapParts, setEditScrapParts] = useState(machine.scrapParts?.toString() || "0");
+  const [editCycleTime, setEditCycleTime] = useState(machine.idealCycleTime?.toString() || "");
   
   useEffect(() => {
     setStatusUpdate(machine.statusUpdate || "");
   }, [machine.statusUpdate]);
+
+  useEffect(() => {
+    setEditGoodParts(machine.goodPartsRan?.toString() || "0");
+    setEditScrapParts(machine.scrapParts?.toString() || "0");
+    setEditCycleTime(machine.idealCycleTime?.toString() || "");
+  }, [machine]);
 
   // Live downtime counter
   const [downtimeDuration, setDowntimeDuration] = useState<string>("");
@@ -182,10 +228,6 @@ export function MachineStatusCard({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => onEditMachine(machine)} data-testid={`button-edit-machine-${machine.id}`}>
-              <Settings2 className="mr-2 h-4 w-4" />
-              Edit Machine
-            </DropdownMenuItem>
             <DropdownMenuItem onClick={() => onAssignOperator(machine.id)} data-testid={`button-assign-operator-${machine.id}`}>
               <UserCircle className="mr-2 h-4 w-4" />
               Assign Operator
@@ -258,23 +300,146 @@ export function MachineStatusCard({
           )}
         </div>
 
-        {/* Production Stats */}
+        {/* OEE Metrics */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Target className="h-4 w-4" />
-              <span>Production</span>
+              <span>OEE Metrics</span>
             </div>
-            <span className="font-mono text-sm font-medium" data-testid={`text-production-${machine.id}`}>
-              {machine.unitsProduced} / {machine.targetUnits}
-            </span>
+            {!editingOeeMetrics && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs"
+                onClick={() => setEditingOeeMetrics(true)}
+              >
+                Edit
+              </Button>
+            )}
           </div>
-          <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-            <div 
-              className="h-full rounded-full bg-primary transition-all duration-500"
-              style={{ width: `${progressPercent}%` }}
-              data-testid={`progress-production-${machine.id}`}
-            />
+          
+          {editingOeeMetrics ? (
+            <div className="space-y-2">
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                <div className="space-y-1">
+                  <label className="text-muted-foreground text-xs">Good Parts</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editGoodParts}
+                    onChange={(e) => setEditGoodParts(e.target.value)}
+                    className="w-full px-2 py-1 text-sm border rounded bg-background"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-muted-foreground text-xs">Scrap Parts</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editScrapParts}
+                    onChange={(e) => setEditScrapParts(e.target.value)}
+                    className="w-full px-2 py-1 text-sm border rounded bg-background"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-muted-foreground text-xs">Cycle Time (sec)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    value={editCycleTime}
+                    onChange={(e) => setEditCycleTime(e.target.value)}
+                    className="w-full px-2 py-1 text-sm border rounded bg-background"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-2 pt-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="flex-1 h-8 text-xs"
+                  onClick={() => {
+                    setEditingOeeMetrics(false);
+                    setEditGoodParts(machine.goodPartsRan?.toString() || "0");
+                    setEditScrapParts(machine.scrapParts?.toString() || "0");
+                    setEditCycleTime(machine.idealCycleTime?.toString() || "");
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  className="flex-1 h-8 text-xs gap-1.5"
+                  onClick={() => {
+                    const goodParts = parseInt(editGoodParts);
+                    const scrapParts = parseInt(editScrapParts);
+                    const cycleTime = parseFloat(editCycleTime);
+                    
+                    onEditMachine({
+                      ...machine,
+                      goodPartsRan: isNaN(goodParts) ? 0 : goodParts,
+                      scrapParts: isNaN(scrapParts) ? 0 : scrapParts,
+                      idealCycleTime: isNaN(cycleTime) ? 0 : cycleTime,
+                    });
+                    setEditingOeeMetrics(false);
+                  }}
+                  disabled={isPendingSubmit}
+                >
+                  <Send className="h-3.5 w-3.5" />
+                  {isPendingSubmit ? "Saving..." : "Save"}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="bg-muted/50 p-3 rounded">
+                <p className="text-muted-foreground text-xs">Good Parts</p>
+                <p className="font-bold text-lg">{machine.goodPartsRan || 0}</p>
+              </div>
+              <div className="bg-muted/50 p-3 rounded">
+                <p className="text-muted-foreground text-xs">Scrap Parts</p>
+                <p className="font-bold text-lg">{machine.scrapParts || 0}</p>
+              </div>
+              <div className="bg-muted/50 p-3 rounded">
+                <p className="text-muted-foreground text-xs">Cycle Time (sec)</p>
+                <p className="font-bold text-lg">{machine.idealCycleTime || "—"}</p>
+              </div>
+            </div>
+          )}
+
+          {/* APQ Breakdown */}
+          <div className="space-y-2 pt-2 border-t">
+            <div className="grid grid-cols-4 gap-2">
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Availability</p>
+                <Badge variant="outline" className="w-full justify-center text-xs font-semibold">
+                  {actualRuntime >= 0 ? ((actualRuntime / 420) * 100).toFixed(1) : "—"}%
+                </Badge>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Performance</p>
+                <Badge variant="outline" className="w-full justify-center text-xs font-semibold">
+                  {machine.idealCycleTime && actualRuntime > 0
+                    ? ((((machine.goodPartsRan || 0) + (machine.scrapParts || 0)) * machine.idealCycleTime) / (actualRuntime * 60) * 100).toFixed(1)
+                    : "—"}%
+                </Badge>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Quality</p>
+                <Badge variant="outline" className="w-full justify-center text-xs font-semibold">
+                  {((machine.goodPartsRan || 0) + (machine.scrapParts || 0) > 0
+                    ? (((machine.goodPartsRan || 0) / ((machine.goodPartsRan || 0) + (machine.scrapParts || 0))) * 100)
+                    : 0).toFixed(1)}%
+                </Badge>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">OEE</p>
+                <Badge className="w-full justify-center text-xs font-semibold" variant={oee !== null ? "default" : "secondary"}>
+                  {oee !== null ? oee.toFixed(1) : "—"}%
+                </Badge>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -313,38 +478,64 @@ export function MachineStatusCard({
           )}
         </div>
 
-        {/* Quick Status Change Buttons */}
+        {/* Quick Status Change Dropdown */}
         <div className="flex gap-2">
+          <div className="flex-1">
+            <Select value={machine.status} onValueChange={(value) => onStatusChange(machine.id, value as MachineStatus)}>
+              <SelectTrigger className="h-9 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="running">
+                  <div className="flex items-center gap-2">
+                    <Play className="h-3 w-3" />
+                    Running
+                  </div>
+                </SelectItem>
+                <SelectItem value="idle">
+                  <div className="flex items-center gap-2">
+                    <Pause className="h-3 w-3" />
+                    Idle
+                  </div>
+                </SelectItem>
+                <SelectItem value="maintenance">
+                  <div className="flex items-center gap-2">
+                    <Wrench className="h-3 w-3" />
+                    Maintenance
+                  </div>
+                </SelectItem>
+                <SelectItem value="down">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-3 w-3" />
+                    Down
+                  </div>
+                </SelectItem>
+                <SelectItem value="setup">
+                  <div className="flex items-center gap-2">
+                    <Settings2 className="h-3 w-3" />
+                    Setup
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           <Button
-            variant={machine.status === "running" ? "default" : "outline"}
+            variant="outline"
             size="sm"
-            className="flex-1 gap-1.5"
-            onClick={() => onStatusChange(machine.id, "running")}
-            disabled={machine.status === "running"}
-            data-testid={`button-status-running-${machine.id}`}
+            className="gap-1.5 mr-2"
+            onClick={() => onLogMaintenance(machine.id)}
+            data-testid={`button-maintenance-${machine.id}`}
           >
-            <Play className="h-3.5 w-3.5" />
-            Run
-          </Button>
-          <Button
-            variant={machine.status === "idle" ? "secondary" : "outline"}
-            size="sm"
-            className="flex-1 gap-1.5"
-            onClick={() => onStatusChange(machine.id, "idle")}
-            disabled={machine.status === "idle"}
-            data-testid={`button-status-idle-${machine.id}`}
-          >
-            <Pause className="h-3.5 w-3.5" />
-            Idle
+            <Wrench className="h-3.5 w-3.5" />
           </Button>
           <Button
             variant="outline"
             size="sm"
             className="gap-1.5"
-            onClick={() => onLogMaintenance(machine.id)}
-            data-testid={`button-maintenance-${machine.id}`}
+            onClick={() => onLogDowntime(machine.id)}
+            data-testid={`button-downtime-${machine.id}`}
           >
-            <Wrench className="h-3.5 w-3.5" />
+            <AlertTriangle className="h-3.5 w-3.5" />
           </Button>
         </div>
 

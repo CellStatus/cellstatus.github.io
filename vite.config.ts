@@ -38,5 +38,12 @@ export default defineConfig({
       strict: true,
       deny: ["**/.*"],
     },
+    proxy: {
+      "/api": {
+        target: "https://cellstatus.onrender.com",
+        changeOrigin: true,
+        secure: false,
+      },
+    },
   },
 });

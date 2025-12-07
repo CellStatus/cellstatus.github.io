@@ -58,12 +58,10 @@ export const machines = pgTable("machines", {
   machineId: text("machine_id").notNull(),
   status: text("status").notNull().$type<MachineStatus>(),
   operatorId: varchar("operator_id"),
-  unitsProduced: integer("units_produced").notNull().default(0),
-  targetUnits: integer("target_units").notNull().default(100),
-  cycleTime: real("cycle_time"),
-  efficiency: real("efficiency"),
-  statusUpdate: text("status_update"),
-  lastUpdated: text("last_updated"),
+  // OEE fields
+  idealCycleTime: real("ideal_cycle_time"),
+  goodPartsRan: integer("good_parts_ran").default(0),
+  scrapParts: integer("scrap_parts").default(0),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
   createdBy: varchar("created_by"),
@@ -101,10 +99,14 @@ export const productionStats = pgTable("production_stats", {
   machineId: varchar("machine_id").notNull(),
   shift: text("shift").notNull(),
   date: text("date").notNull(),
-  unitsProduced: integer("units_produced").notNull(),
-  targetUnits: integer("target_units").notNull(),
+  goodPartsRan: integer("good_parts_ran").notNull(),
+  scrapParts: integer("scrap_parts").default(0),
+  idealCycleTime: real("ideal_cycle_time"),
   downtime: integer("downtime").default(0),
-  efficiency: real("efficiency"),
+  oee: real("oee"),
+  availability: real("availability"),
+  performance: real("performance"),
+  quality: real("quality"),
   createdAt: text("created_at").notNull(),
   createdBy: varchar("created_by"),
 });
@@ -230,3 +232,33 @@ export const eventMembers = pgTable("event_members", {
 export const insertEventMemberSchema = createInsertSchema(eventMembers).omit({ id: true, createdAt: true });
 export type InsertEventMember = z.infer<typeof insertEventMemberSchema>;
 export type EventMember = typeof eventMembers.$inferSelect;
+
+// === MANUFACTURING CELLS ===
+
+// Manufacturing cells table
+export const cells = pgTable("cells", {
+  id: varchar("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  targetOee: real("target_oee").default(85),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+  createdBy: varchar("created_by"),
+  updatedBy: varchar("updated_by"),
+});
+
+export const insertCellSchema = createInsertSchema(cells).omit({ id: true, createdAt: true, updatedAt: true, createdBy: true, updatedBy: true });
+export type InsertCell = z.infer<typeof insertCellSchema>;
+export type Cell = typeof cells.$inferSelect;
+
+// Cell machines assignment table
+export const cellMachines = pgTable("cell_machines", {
+  id: varchar("id").primaryKey(),
+  cellId: varchar("cell_id").notNull(),
+  machineId: varchar("machine_id").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+
+export const insertCellMachineSchema = createInsertSchema(cellMachines).omit({ id: true, createdAt: true });
+export type InsertCellMachine = z.infer<typeof insertCellMachineSchema>;
+export type CellMachine = typeof cellMachines.$inferSelect;

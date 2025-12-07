@@ -9,9 +9,13 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { useAuth } from "@/hooks/useAuth";
 import Dashboard from "@/pages/dashboard";
 import MachinesPage from "@/pages/machines";
+import CellsPage from "@/pages/cells";
 import OperatorsPage from "@/pages/operators";
 import MaintenancePage from "@/pages/maintenance";
 import ReportsPage from "@/pages/reports";
+import ProductionStatsPage from "@/pages/production-stats";
+import DowntimePage from "@/pages/downtime";
+import ScrapPage from "@/pages/scrap";
 import EventsPage from "@/pages/events";
 import Landing from "@/pages/landing";
 import NotFound from "@/pages/not-found";
@@ -60,9 +64,13 @@ function AppContent() {
             <Switch>
               <Route path="/" component={Dashboard} />
               <Route path="/machines" component={MachinesPage} />
+              <Route path="/cells" component={CellsPage} />
               <Route path="/operators" component={OperatorsPage} />
               <Route path="/maintenance" component={MaintenancePage} />
               <Route path="/reports" component={ReportsPage} />
+              <Route path="/production-stats" component={ProductionStatsPage} />
+              <Route path="/downtime" component={DowntimePage} />
+              <Route path="/scrap" component={ScrapPage} />
               <Route path="/events" component={EventsPage} />
               <Route component={NotFound} />
             </Switch>

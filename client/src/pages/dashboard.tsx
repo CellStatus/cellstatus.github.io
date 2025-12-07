@@ -26,6 +26,7 @@ import {
   Search,
 } from "lucide-react";
 import type { Machine, Operator, MachineStatus, ProductionStat, DowntimeLog } from "@shared/schema";
+import { calculateOEEStats } from "@/lib/oeeUtils";
 
 export default function Dashboard() {
   const { toast } = useToast();
@@ -60,6 +61,10 @@ export default function Dashboard() {
     refetchInterval: 30000, // Refresh every 30 seconds
   });
 
+  const { data: downtimeLogs = [] } = useQuery<DowntimeLog[]>({
+    queryKey: ["/api/downtime"],
+  });
+
   const createMachineMutation = useMutation({
     mutationFn: (data: Partial<Machine>) => apiRequest("POST", "/api/machines", data),
     onSuccess: () => {
@@ -74,15 +79,16 @@ export default function Dashboard() {
 
   const updateMachineMutation = useMutation({
     mutationFn: ({ id, ...data }: Partial<Machine> & { id: string }) => 
-      apiRequest("PATCH", `/api/machines/${id}`, data),
+      apiRequest("PATCH", `/api/machines/${id}`, data).then(res => res.json()),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/machines"] });
       setMachineDialogOpen(false);
       setEditingMachine(null);
       toast({ title: "Machine updated successfully" });
     },
-    onError: () => {
-      toast({ title: "Failed to update machine", variant: "destructive" });
+    onError: (error: any) => {
+      console.error("Update error:", error);
+      toast({ title: "Failed to update machine", description: error.message, variant: "destructive" });
     },
   });
 
@@ -229,8 +235,15 @@ export default function Dashboard() {
   };
 
   const handleEditMachine = (machine: Machine) => {
-    setEditingMachine(machine);
-    setMachineDialogOpen(true);
+    // Extract only the OEE metrics to update
+    const updateData = { 
+      id: machine.id,
+      goodPartsRan: machine.goodPartsRan,
+      scrapParts: machine.scrapParts,
+      idealCycleTime: machine.idealCycleTime,
+    };
+    console.log("Updating machine with:", updateData);
+    updateMachineMutation.mutate(updateData);
   };
 
   const handleStatusChange = (machineId: string, status: MachineStatus) => {
@@ -265,14 +278,40 @@ export default function Dashboard() {
     if (!machine) return;
     const d = new Date();
     const today = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-    
+    // Aggregate downtime for selected machine, date, and shift
+    const relevantDowntimeLogs = downtimeLogs.filter((log) => {
+      // If downtime logs have a date/shift field, use it; else fallback to startTime
+      if (log.date && log.shift) {
+        return log.machineId === machineId && log.date === today && log.shift === selectedShift;
+      }
+      // Fallback: match by startTime date
+      return log.machineId === machineId && log.startTime.startsWith(today);
+    });
+    const aggregatedDowntime = relevantDowntimeLogs.reduce((sum, log) => sum + (log.duration || 0), 0);
+    // Calculate OEE metrics using shared logic
+    const plannedProductionTime = 420;
+    const goodPartsRan = machine.goodPartsRan || 0;
+    const scrapParts = machine.scrapParts || 0;
+    const idealCycleTime = machine.idealCycleTime || 0;
+    const oeeStats = calculateOEEStats({
+      plannedProductionTime,
+      downtime: aggregatedDowntime,
+      goodPartsRan,
+      scrapParts,
+      idealCycleTime,
+    });
     submitProductionStatMutation.mutate({
       machineId: machine.id,
       shift: selectedShift,
       date: today,
-      unitsProduced: machine.unitsProduced,
-      targetUnits: machine.targetUnits,
-      efficiency: machine.efficiency,
+      goodPartsRan,
+      scrapParts,
+      idealCycleTime,
+      downtime: aggregatedDowntime,
+      oee: oeeStats.oee,
+      availability: oeeStats.availability,
+      performance: oeeStats.performance,
+      quality: oeeStats.quality,
     });
   };
 
@@ -325,12 +364,6 @@ export default function Dashboard() {
   const maintenanceCount = filteredMachines.filter((m) => m.status === "maintenance").length;
   const downCount = filteredMachines.filter((m) => m.status === "down").length;
   const setupCount = filteredMachines.filter((m) => m.status === "setup").length;
-
-  const totalUnits = filteredMachines.reduce((sum, m) => sum + m.unitsProduced, 0);
-  const totalTarget = filteredMachines.reduce((sum, m) => sum + m.targetUnits, 0);
-  const avgEfficiency = filteredMachines.length > 0
-    ? filteredMachines.reduce((sum, m) => sum + (m.efficiency ?? 0), 0) / filteredMachines.length
-    : 0;
 
   // Calculate active downtime duration
   const getActiveDowntimeForMachine = (machineId: string) => {
@@ -403,8 +436,8 @@ export default function Dashboard() {
         </div>
 
         {/* Summary Stats */}
-        <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-6">
-          <div className="flex items-center gap-2 rounded-md bg-background p-2">
+        <div className="mt-3 grid grid-cols-4 gap-3">
+          <div className="flex items-center gap-2 rounded-md bg-background p-3">
             <div className="flex h-8 w-8 items-center justify-center rounded-md bg-machine-running/10">
               <Play className="h-4 w-4 text-machine-running" />
             </div>
@@ -413,7 +446,7 @@ export default function Dashboard() {
               <p className="text-[10px] text-muted-foreground leading-tight">Running</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 rounded-md bg-background p-2">
+          <div className="flex items-center gap-2 rounded-md bg-background p-3">
             <div className="flex h-8 w-8 items-center justify-center rounded-md bg-machine-idle/10">
               <Pause className="h-4 w-4 text-machine-idle" />
             </div>
@@ -422,7 +455,7 @@ export default function Dashboard() {
               <p className="text-[10px] text-muted-foreground leading-tight">Idle</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 rounded-md bg-background p-2">
+          <div className="flex items-center gap-2 rounded-md bg-background p-3">
             <div className="flex h-8 w-8 items-center justify-center rounded-md bg-machine-maintenance/10">
               <Wrench className="h-4 w-4 text-machine-maintenance" />
             </div>
@@ -431,7 +464,7 @@ export default function Dashboard() {
               <p className="text-[10px] text-muted-foreground leading-tight">Maint</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 rounded-md bg-background p-2">
+          <div className="flex items-center gap-2 rounded-md bg-background p-3">
             <div className="flex h-8 w-8 items-center justify-center rounded-md bg-machine-down/10">
               <AlertTriangle className="h-4 w-4 text-machine-down" />
             </div>
@@ -445,28 +478,6 @@ export default function Dashboard() {
                   </span>
                 )}
               </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 rounded-md bg-background p-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10">
-              <Target className="h-4 w-4 text-primary" />
-            </div>
-            <div>
-              <p className="text-lg font-mono font-bold" data-testid="stat-units">
-                {totalUnits}<span className="text-xs text-muted-foreground font-normal">/{totalTarget}</span>
-              </p>
-              <p className="text-[10px] text-muted-foreground leading-tight">Units</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 rounded-md bg-background p-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10">
-              <TrendingUp className="h-4 w-4 text-primary" />
-            </div>
-            <div>
-              <p className={`text-lg font-mono font-bold ${avgEfficiency >= 90 ? 'text-machine-running' : avgEfficiency >= 70 ? 'text-machine-maintenance' : 'text-machine-down'}`} data-testid="stat-efficiency">
-                {avgEfficiency > 0 ? `${avgEfficiency.toFixed(0)}%` : "--"}
-              </p>
-              <p className="text-[10px] text-muted-foreground leading-tight">Avg Eff.</p>
             </div>
           </div>
         </div>
@@ -534,6 +545,7 @@ export default function Dashboard() {
                   key={machine.id}
                   machine={machine}
                   operator={getOperatorById(machine.operatorId)}
+                  downtimeLogs={downtimeLogs}
                   onStatusChange={handleStatusChange}
                   onAssignOperator={handleAssignOperator}
                   onLogMaintenance={handleLogMaintenance}
