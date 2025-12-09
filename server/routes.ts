@@ -65,6 +65,7 @@ export async function registerRoutes(
       const machines = await storage.getMachines();
       res.json(machines);
     } catch (error) {
+      console.error("Error in /api/machines:", error);
       res.status(500).json({ error: "Failed to fetch machines" });
     }
   });

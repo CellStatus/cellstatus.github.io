@@ -10,6 +10,7 @@ import { AssignOperatorDialog } from "@/components/assign-operator-dialog";
 import { DowntimeDialog } from "@/components/downtime-dialog";
 import { ResolveDowntimeDialog } from "@/components/resolve-downtime-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { TimeWheelPicker } from "@/components/ui/time-wheel-picker";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Input } from "@/components/ui/input";
@@ -20,27 +21,30 @@ import {
   Wrench, 
   AlertTriangle, 
   Settings2,
-  TrendingUp,
-  Target,
-  Clock,
   Search,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import type { Machine, Operator, MachineStatus, ProductionStat, DowntimeLog } from "@shared/schema";
 import { calculateOEEStats } from "@/lib/oeeUtils";
-
 // Helper to get EST time
 function getESTDate() {
   return new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
 }
 
 // Shift schedule
-const shiftTimes = [
+const defaultShiftTimes = [
   { name: "Day", start: "06:30", end: "14:30" },
   { name: "Evening", start: "14:30", end: "22:30" },
   { name: "Night", start: "22:30", end: "06:30" },
 ];
 
-function getCurrentShift(estTime) {
+const defaultBreaks = [
+  { name: "Break", start: "10:30", end: "11:00" },
+  { name: "Lunch", start: "12:30", end: "13:00" },
+];
+
+function getCurrentShift(estTime: Date, shiftTimes: { name: string; start: string; end: string }[]) {
   const hours = estTime.getHours();
   const minutes = estTime.getMinutes();
   const timeNum = hours * 60 + minutes;
@@ -54,6 +58,112 @@ function getCurrentShift(estTime) {
 }
 
 export default function Dashboard() {
+    // ...existing code...
+    const { data: machines = [], isLoading: machinesLoading } = useQuery<Machine[]>({
+      queryKey: ["/api/machines"],
+    });
+
+    // Debug: log machines data to console
+    useEffect(() => {
+      console.log('Dashboard machines:', machines);
+    }, [machines]);
+  // Collapsible top pane state
+  const [showTopPane, setShowTopPane] = useState(true);
+  // Mutations
+  const updateMachineMutation = useMutation({
+    mutationFn: async (data: Partial<Machine> & { id: string }) => {
+      return apiRequest("PATCH", `/api/machines/${data.id}`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/machines"] });
+      setMachineDialogOpen(false);
+      setEditingMachine(null);
+      toast({ title: "Machine updated successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to update machine", variant: "destructive" });
+    },
+  });
+
+  const updateStatusMutation = useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: MachineStatus }) => {
+      return apiRequest("PATCH", `/api/machines/${id}/status`, { status });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/machines"] });
+    },
+    onError: () => {
+      toast({ title: "Failed to update status", variant: "destructive" });
+    },
+  });
+
+  const submitProductionStatMutation = useMutation({
+    mutationFn: async (data: Record<string, unknown>) => {
+      return apiRequest("POST", "/api/production-stats", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/production-stats"] });
+      toast({ title: "Production stats submitted" });
+    },
+    onError: () => {
+      toast({ title: "Failed to submit production stats", variant: "destructive" });
+    },
+  });
+
+  const createMachineMutation = useMutation({
+    mutationFn: async (data: Record<string, unknown>) => {
+      return apiRequest("POST", "/api/machines", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/machines"] });
+      setMachineDialogOpen(false);
+      setEditingMachine(null);
+      toast({ title: "Machine created successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to create machine", variant: "destructive" });
+    },
+  });
+
+  const assignOperatorMutation = useMutation({
+    mutationFn: async ({ machineId, operatorId }: { machineId: string; operatorId: string | null }) => {
+      return apiRequest("PATCH", `/api/machines/${machineId}/operator`, { operatorId });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/machines"] });
+      setAssignDialogOpen(false);
+      setAssigningMachine(null);
+      toast({ title: "Operator assigned successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to assign operator", variant: "destructive" });
+    },
+  });
+
+  const updateStatusUpdateMutation = useMutation({
+    mutationFn: async ({ id, statusUpdate }: { id: string; statusUpdate: string }) => {
+      return apiRequest("PATCH", `/api/machines/${id}/status-update`, { statusUpdate });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/machines"] });
+      toast({ title: "Status update saved" });
+    },
+    onError: () => {
+      toast({ title: "Failed to update status", variant: "destructive" });
+    },
+  });
+        // Query all downtime logs for stats and reporting
+        const { data: downtimeLogs = [] } = useQuery<DowntimeLog[]>({
+          queryKey: ["/api/downtime"],
+        });
+      const [showScheduleSettings, setShowScheduleSettings] = useState(false);
+    // Editable shift and break times
+    const [shiftTimes, setShiftTimes] = useState(() => JSON.parse(localStorage.getItem("shiftTimes") || "null") || defaultShiftTimes);
+    const [breaks, setBreaks] = useState(() => JSON.parse(localStorage.getItem("breaks") || "null") || defaultBreaks);
+
+    // Save to localStorage on change
+    useEffect(() => { localStorage.setItem("shiftTimes", JSON.stringify(shiftTimes)); }, [shiftTimes]);
+    useEffect(() => { localStorage.setItem("breaks", JSON.stringify(breaks)); }, [breaks]);
   const { toast } = useToast();
   const [machineDialogOpen, setMachineDialogOpen] = useState(false);
   const [editingMachine, setEditingMachine] = useState<Machine | null>(null);
@@ -68,9 +178,7 @@ export default function Dashboard() {
   const [resolvingDowntime, setResolvingDowntime] = useState<DowntimeLog | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>("");
 
-  const { data: machines = [], isLoading: machinesLoading } = useQuery<Machine[]>({
-    queryKey: ["/api/machines"],
-  });
+
 
   const { data: operators = [] } = useQuery<Operator[]>({
     queryKey: ["/api/operators"],
@@ -78,102 +186,14 @@ export default function Dashboard() {
 
   const { data: productionStats = [] } = useQuery<ProductionStat[]>({
     queryKey: ["/api/production-stats"],
-    staleTime: 0,
   });
 
+  // Add useQuery for active downtime logs
   const { data: activeDowntime = [] } = useQuery<DowntimeLog[]>({
     queryKey: ["/api/downtime/active"],
-    refetchInterval: 30000, // Refresh every 30 seconds
   });
 
-  const { data: downtimeLogs = [] } = useQuery<DowntimeLog[]>({
-    queryKey: ["/api/downtime"],
-  });
 
-  const createMachineMutation = useMutation({
-    mutationFn: (data: Partial<Machine>) => apiRequest("POST", "/api/machines", data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/machines"] });
-      setMachineDialogOpen(false);
-      toast({ title: "Machine added successfully" });
-    },
-    onError: () => {
-      toast({ title: "Failed to add machine", variant: "destructive" });
-    },
-  });
-
-  const updateMachineMutation = useMutation({
-    mutationFn: ({ id, ...data }: Partial<Machine> & { id: string }) => 
-      apiRequest("PATCH", `/api/machines/${id}`, data).then(res => res.json()),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/machines"] });
-      setMachineDialogOpen(false);
-      setEditingMachine(null);
-      toast({ title: "Machine updated successfully" });
-    },
-    onError: (error: any) => {
-      console.error("Update error:", error);
-      toast({ title: "Failed to update machine", description: error.message, variant: "destructive" });
-    },
-  });
-
-  const updateStatusMutation = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: MachineStatus }) =>
-      apiRequest("PATCH", `/api/machines/${id}/status`, { status }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/machines"] });
-    },
-    onError: () => {
-      toast({ title: "Failed to update status", variant: "destructive" });
-    },
-  });
-
-  const assignOperatorMutation = useMutation({
-    mutationFn: ({ machineId, operatorId }: { machineId: string; operatorId: string | null }) =>
-      apiRequest("PATCH", `/api/machines/${machineId}/operator`, { operatorId }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/machines"] });
-      setAssignDialogOpen(false);
-      setAssigningMachine(null);
-      toast({ title: "Operator assignment updated" });
-    },
-    onError: () => {
-      toast({ title: "Failed to assign operator", variant: "destructive" });
-    },
-  });
-
-  const updateStatusUpdateMutation = useMutation({
-    mutationFn: ({ machineId, statusUpdate }: { machineId: string; statusUpdate: string }) =>
-      apiRequest("PATCH", `/api/machines/${machineId}/status-update`, { statusUpdate }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/machines"] });
-      toast({ title: "Status update saved" });
-    },
-    onError: () => {
-      toast({ title: "Failed to save status update", variant: "destructive" });
-    },
-  });
-
-  const submitProductionStatMutation = useMutation({
-    mutationFn: (data: { 
-      machineId: string; 
-      shift: string; 
-      date: string; 
-      unitsProduced: number; 
-      targetUnits: number; 
-      efficiency: number | null;
-    }) => apiRequest("POST", "/api/production-stats", data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/production-stats"] });
-      // Ensure reports reflect today's submission immediately
-      queryClient.invalidateQueries({ queryKey: ["/api/reports/efficiency"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/reports/machine-history"] });
-      toast({ title: "Production stats submitted successfully" });
-    },
-    onError: () => {
-      toast({ title: "Failed to submit production stats", variant: "destructive" });
-    },
-  });
 
   const deleteProductionStatsMutation = useMutation({
     mutationFn: async ({ machineId, date, shift }: { machineId: string; date: string; shift?: string }) => {
@@ -259,14 +279,10 @@ export default function Dashboard() {
     setMachineDialogOpen(true);
   };
 
-  const handleEditMachine = (machine: Machine) => {
-    // Extract only the OEE metrics to update
-    const updateData = { 
-      id: machine.id,
-      goodPartsRan: machine.goodPartsRan,
-      scrapParts: machine.scrapParts,
-      idealCycleTime: machine.idealCycleTime,
-    };
+  const handleEditMachine = (machine: Machine & { runtime?: number }) => {
+    // Extract only the OEE metrics to update, ignore runtime
+    const { id, goodPartsRan, scrapParts, idealCycleTime } = machine;
+    const updateData = { id, goodPartsRan, scrapParts, idealCycleTime };
     console.log("Updating machine with:", updateData);
     updateMachineMutation.mutate(updateData);
   };
@@ -306,8 +322,8 @@ export default function Dashboard() {
     // Aggregate downtime for selected machine, date, and shift
     const relevantDowntimeLogs = downtimeLogs.filter((log) => {
       // If downtime logs have a date/shift field, use it; else fallback to startTime
-      if (log.date && log.shift) {
-        return log.machineId === machineId && log.date === today && log.shift === selectedShift;
+      if ((log as any).date && (log as any).shift) {
+        return log.machineId === machineId && (log as any).date === today && (log as any).shift === selectedShift;
       }
       // Fallback: match by startTime date
       return log.machineId === machineId && log.startTime.startsWith(today);
@@ -427,230 +443,383 @@ export default function Dashboard() {
   }, []);
 
   // Planned runtime calculation for current shift
-  const currentShift = getCurrentShift(estTime);
+  function getCurrentShiftWithCustom(estTime: Date) {
+    const hours = estTime.getHours();
+    const minutes = estTime.getMinutes();
+    const timeNum = hours * 60 + minutes;
+    for (const shift of shiftTimes) {
+      const [sh, sm] = shift.start.split(":").map(Number);
+      const [eh, em] = shift.end.split(":").map(Number);
+      const startNum = sh * 60 + sm;
+      let endNum = eh * 60 + em;
+      if (endNum <= startNum) endNum += 24 * 60; // wrap overnight
+      if (timeNum >= startNum && timeNum < endNum) return shift;
+    }
+    return shiftTimes[0];
+  }
+  const currentShift = getCurrentShiftWithCustom(estTime);
   // Get today's date string in EST
   const todayStr = estTime.toISOString().slice(0, 10);
   // Get shift start datetime
   let shiftStartDate = new Date(todayStr + 'T' + currentShift.start + ':00-05:00');
-  // If night shift and current time is before 6:30am, shift started yesterday
   if (currentShift.name === "Night" && estTime.getHours() < 6) {
     const yesterday = new Date(estTime);
     yesterday.setDate(estTime.getDate() - 1);
     const ystr = yesterday.toISOString().slice(0, 10);
-    shiftStartDate = new Date(ystr + 'T22:30:00-05:00');
+    shiftStartDate = new Date(ystr + 'T' + currentShift.start + ':00-05:00');
   }
   let plannedRuntimeMinutes = Math.floor((estTime.getTime() - shiftStartDate.getTime()) / 60000);
-  // Subtract 1 hour for breaks/lunch if shift has started
+  // Subtract break minutes if shift has started
+  let breakMinutes = 0;
+  for (const brk of breaks) {
+    const [bh, bm] = brk.start.split(":").map(Number);
+    const [eh, em] = brk.end.split(":").map(Number);
+    let bStart = new Date(shiftStartDate);
+    bStart.setHours(bh, bm, 0, 0);
+    let bEnd = new Date(shiftStartDate);
+    bEnd.setHours(eh, em, 0, 0);
+    if (bEnd <= bStart) bEnd.setDate(bEnd.getDate() + 1);
+    if (bEnd > shiftStartDate && bStart < estTime) {
+      // Only count break time that has elapsed so far in shift
+      const overlapStart = bStart < shiftStartDate ? shiftStartDate : bStart;
+      const overlapEnd = bEnd > estTime ? estTime : bEnd;
+      if (overlapEnd > overlapStart) {
+        breakMinutes += Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / 60000);
+      }
+    }
+  }
   if (plannedRuntimeMinutes > 0) {
-    plannedRuntimeMinutes -= 60;
+    plannedRuntimeMinutes -= breakMinutes;
     if (plannedRuntimeMinutes < 0) plannedRuntimeMinutes = 0;
   } else {
     plannedRuntimeMinutes = 0;
   }
 
+  // Determine if currently in break or runtime
+  let isBreak = false;
+  for (const brk of breaks) {
+    const [bh, bm] = brk.start.split(":").map(Number);
+    const [eh, em] = brk.end.split(":").map(Number);
+    let bStart = new Date(shiftStartDate);
+    bStart.setHours(bh, bm, 0, 0);
+    let bEnd = new Date(shiftStartDate);
+    bEnd.setHours(eh, em, 0, 0);
+    if (bEnd <= bStart) bEnd.setDate(bEnd.getDate() + 1);
+    if (estTime >= bStart && estTime < bEnd) {
+      isBreak = true;
+      break;
+    }
+  }
+
   return (
     <div className="flex flex-col h-full">
-      {/* Header Stats */}
-      <div className="border-b bg-card/50 px-6 py-4">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
+      {/* Collapsible Top Pane */}
+      <div className="border-b bg-card/50">
+        <div className="flex items-center justify-between px-6 py-2">
+          <div className="flex items-center gap-2">
+            <button
+              className="rounded p-1 hover:bg-muted transition"
+              onClick={() => setShowTopPane(v => !v)}
+              aria-label={showTopPane ? 'Collapse top pane' : 'Expand top pane'}
+              data-testid="button-toggle-top-pane"
+            >
+              {showTopPane ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+            </button>
             <h1 className="text-2xl font-semibold" data-testid="text-dashboard-title">Cell Dashboard</h1>
-            <p className="text-sm text-muted-foreground">Real-time manufacturing cell status</p>
           </div>
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="relative flex-1 min-w-[200px] max-w-[300px]">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                type="text"
-                placeholder="Search machines..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9"
-                data-testid="input-search-machines"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">Shift</span>
-              <Select value={selectedShift} onValueChange={(v) => setSelectedShift(v)}>
-                <SelectTrigger className="w-[140px]" data-testid="select-shift-picker">
-                  <SelectValue placeholder="Select shift" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Day">Day</SelectItem>
-                  <SelectItem value="Afternoon">Afternoon</SelectItem>
-                  <SelectItem value="Midnight">Midnight</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <Button onClick={handleAddMachine} className="gap-2 shrink-0" data-testid="button-add-machine">
-              <Plus className="h-4 w-4" />
-              Add Machine
-            </Button>
-          </div>
+          <span className="text-sm text-muted-foreground">Real-time manufacturing cell status</span>
         </div>
-
-        {/* Summary Stats */}
-        <div className="mt-3 grid grid-cols-4 gap-3">
-          <div className="flex items-center gap-2 rounded-md bg-background p-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-machine-running/10">
-              <Play className="h-4 w-4 text-machine-running" />
+        {showTopPane && (
+          <>
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between px-6">
+              <div className="flex flex-wrap gap-3 items-center">
+                <div className="flex items-center gap-2">
+                  <Search className="h-4 w-4 text-muted-foreground" />
+                  <Input
+                    type="text"
+                    placeholder="Search machines..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-7 w-44"
+                    data-testid="input-search-machines"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">Shift</span>
+                  <Select value={selectedShift} onValueChange={(v) => setSelectedShift(v)}>
+                    <SelectTrigger className="w-[110px]" data-testid="select-shift-picker">
+                      <SelectValue placeholder="Shift" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Day">Day</SelectItem>
+                      <SelectItem value="Afternoon">Afternoon</SelectItem>
+                      <SelectItem value="Midnight">Midnight</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button onClick={handleAddMachine} className="gap-2" data-testid="button-add-machine">
+                  <Plus className="h-4 w-4" />
+                  Add Machine
+                </Button>
+                <Button variant="ghost" size="sm" className="gap-1 ml-2" onClick={() => setShowScheduleSettings(v => !v)}>
+                  <Settings2 className="h-4 w-4" />
+                  <span>Schedule</span>
+                  {showScheduleSettings ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                </Button>
+              </div>
             </div>
-            <div>
-              <p className="text-lg font-mono font-bold" data-testid="stat-running">{runningCount}</p>
-              <p className="text-[10px] text-muted-foreground leading-tight">Running</p>
+            {/* Summary Stats */}
+            <div className="mt-3 grid grid-cols-4 gap-3 px-6">
+              <div className="flex items-center gap-2 rounded-md bg-background p-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-machine-running/10">
+                  <Play className="h-4 w-4 text-machine-running" />
+                </div>
+                <div>
+                  <p className="text-lg font-mono font-bold" data-testid="stat-running">{runningCount}</p>
+                  <p className="text-[10px] text-muted-foreground leading-tight">Running</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 rounded-md bg-background p-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-machine-idle/10">
+                  <Pause className="h-4 w-4 text-machine-idle" />
+                </div>
+                <div>
+                  <p className="text-lg font-mono font-bold" data-testid="stat-idle">{idleCount}</p>
+                  <p className="text-[10px] text-muted-foreground leading-tight">Idle</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 rounded-md bg-background p-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-machine-maintenance/10">
+                  <Wrench className="h-4 w-4 text-machine-maintenance" />
+                </div>
+                <div>
+                  <p className="text-lg font-mono font-bold" data-testid="stat-maintenance">{maintenanceCount + setupCount}</p>
+                  <p className="text-[10px] text-muted-foreground leading-tight">Maint</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 rounded-md bg-background p-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-machine-down/10">
+                  <AlertTriangle className="h-4 w-4 text-machine-down" />
+                </div>
+                <div>
+                  <p className="text-lg font-mono font-bold" data-testid="stat-down">{downCount}</p>
+                  <p className="text-[10px] text-muted-foreground leading-tight">
+                    Down
+                    {activeDowntime.length > 0 && (
+                      <span className="text-machine-down ml-0.5 text-[9px]">
+                        ({formatDowntimeDuration(totalActiveDowntimeMinutes)})
+                      </span>
+                    )}
+                  </p>
+                </div>
+              </div>
             </div>
-          </div>
-          <div className="flex items-center gap-2 rounded-md bg-background p-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-machine-idle/10">
-              <Pause className="h-4 w-4 text-machine-idle" />
+            {/* EST Clock and Planned Runtime */}
+            <div className="flex items-center gap-8 p-4 border-b bg-muted/10">
+              <div className="flex items-center gap-4">
+                <span className="font-semibold text-lg">Current Time (EST):</span>
+                <span className="font-mono text-lg" data-testid="clock-est">
+                  {estTime.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true })}
+                </span>
+                <span className="font-semibold text-lg ml-6">Planned Runtime Elapsed:</span>
+                <span className="font-mono text-lg" data-testid="planned-runtime">{plannedRuntimeMinutes} min</span>
+                <Badge variant={isBreak ? "destructive" : "default"} className="ml-4">
+                  {isBreak ? "Breaktime" : "Runtime"}
+                </Badge>
+              </div>
             </div>
-            <div>
-              <p className="text-lg font-mono font-bold" data-testid="stat-idle">{idleCount}</p>
-              <p className="text-[10px] text-muted-foreground leading-tight">Idle</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 rounded-md bg-background p-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-machine-maintenance/10">
-              <Wrench className="h-4 w-4 text-machine-maintenance" />
-            </div>
-            <div>
-              <p className="text-lg font-mono font-bold" data-testid="stat-maintenance">{maintenanceCount + setupCount}</p>
-              <p className="text-[10px] text-muted-foreground leading-tight">Maint</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 rounded-md bg-background p-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-machine-down/10">
-              <AlertTriangle className="h-4 w-4 text-machine-down" />
-            </div>
-            <div>
-              <p className="text-lg font-mono font-bold" data-testid="stat-down">{downCount}</p>
-              <p className="text-[10px] text-muted-foreground leading-tight">
-                Down
-                {activeDowntime.length > 0 && (
-                  <span className="text-machine-down ml-0.5 text-[9px]">
-                    ({formatDowntimeDuration(totalActiveDowntimeMinutes)})
-                  </span>
-                )}
-              </p>
-            </div>
-          </div>
-        </div>
+          </>
+        )}
       </div>
-
-      {/* EST Clock and Planned Runtime */}
-      <div className="flex items-center gap-8 p-4 border-b bg-muted/10">
-        <div className="flex items-center gap-2">
-          <span className="font-semibold text-lg">Current Time (EST):</span>
-          <span className="font-mono text-lg" data-testid="clock-est">{estTime.toLocaleTimeString("en-US", { hour12: false })}</span>
+      {showScheduleSettings && (
+        <div className="p-4 border-b bg-muted/20 max-h-[70vh] overflow-auto sm:max-h-none">
+          <div className="flex flex-col gap-6">
+            <div className="flex flex-col gap-3 w-full">
+              <span className="font-semibold mb-1">Edit Shifts:</span>
+              <div className="flex flex-col gap-4 w-full">
+                {shiftTimes.map((shift: { name: string; start: string; end: string }, idx: number) => (
+                  <div key={shift.name} className="flex flex-col sm:flex-row items-center gap-2 w-full border rounded p-3 bg-background">
+                    <span className="text-xs font-medium w-full sm:w-20 text-center mb-1 sm:mb-0">{shift.name}</span>
+                    <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto justify-center items-center">
+                      <TimeWheelPicker
+                        value={shift.start}
+                        onChange={val => {
+                          const newShifts = [...shiftTimes];
+                          newShifts[idx] = { ...shift, start: val };
+                          setShiftTimes(newShifts);
+                        }}
+                        label="Start"
+                      />
+                      <TimeWheelPicker
+                        value={shift.end}
+                        onChange={val => {
+                          const newShifts = [...shiftTimes];
+                          newShifts[idx] = { ...shift, end: val };
+                          setShiftTimes(newShifts);
+                        }}
+                        label="End"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-col gap-3 w-full mt-4">
+              <div className="flex flex-col sm:flex-row gap-2 items-center w-full">
+                <span className="font-semibold">Edit Breaks:</span>
+                <Button size="sm" variant="outline" className="w-full sm:w-auto" onClick={() => {
+                  setBreaks([...breaks, { name: `Break ${breaks.length + 1}`, start: "10:00", end: "10:15" }]);
+                }}>Add Break</Button>
+              </div>
+              <div className="flex flex-col gap-4 w-full">
+                {breaks.map((brk: { name: string; start: string; end: string }, idx: number) => (
+                  <div key={idx} className="flex flex-col sm:flex-row items-center gap-2 border rounded p-3 bg-background relative w-full">
+                    <Button size="sm" variant="ghost" className="absolute top-1 right-1 px-1 py-0.5 text-xs" onClick={() => {
+                      setBreaks(breaks.filter((_: any, i: number) => i !== idx));
+                    }}>Remove</Button>
+                    <input
+                      type="text"
+                      value={brk.name}
+                      onChange={e => {
+                        const newBreaks = [...breaks];
+                        newBreaks[idx] = { ...brk, name: e.target.value };
+                        setBreaks(newBreaks);
+                      }}
+                      className="border rounded px-2 py-2 w-full sm:w-32 text-base text-center mb-1 bg-white text-black placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-primary"
+                      placeholder="Break name"
+                    />
+                    <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto justify-center items-center">
+                      <TimeWheelPicker
+                        value={brk.start}
+                        onChange={val => {
+                          const newBreaks = [...breaks];
+                          newBreaks[idx] = { ...brk, start: val };
+                          setBreaks(newBreaks);
+                        }}
+                        label="Start"
+                      />
+                      <TimeWheelPicker
+                        value={brk.end}
+                        onChange={val => {
+                          const newBreaks = [...breaks];
+                          newBreaks[idx] = { ...brk, end: val };
+                          setBreaks(newBreaks);
+                        }}
+                        label="End"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="font-semibold text-lg">Planned Runtime (up to now):</span>
-          <span className="font-mono text-lg" data-testid="planned-runtime">{plannedRuntimeMinutes} min</span>
-        </div>
-      </div>
+      )}
 
       {/* Machine Grid */}
       <div className="flex-1 overflow-auto p-6">
-        {machinesLoading ? (
-          <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="rounded-lg border p-6 space-y-4">
-                <div className="flex items-center justify-between">
-                  <Skeleton className="h-6 w-32" />
-                  <Skeleton className="h-6 w-16" />
+          {machinesLoading ? (
+            <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="rounded-lg border p-6 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <Skeleton className="h-6 w-32" />
+                    <Skeleton className="h-6 w-16" />
+                  </div>
+                  <Skeleton className="h-8 w-24" />
+                  <Skeleton className="h-10 w-full" />
+                  <div className="grid grid-cols-2 gap-3">
+                    <Skeleton className="h-20" />
+                    <Skeleton className="h-20" />
+                  </div>
+                  <div className="flex gap-2">
+                    <Skeleton className="h-9 flex-1" />
+                    <Skeleton className="h-9 flex-1" />
+                    <Skeleton className="h-9 w-9" />
+                  </div>
                 </div>
-                <Skeleton className="h-8 w-24" />
-                <Skeleton className="h-10 w-full" />
-                <div className="grid grid-cols-2 gap-3">
-                  <Skeleton className="h-20" />
-                  <Skeleton className="h-20" />
-                </div>
-                <div className="flex gap-2">
-                  <Skeleton className="h-9 flex-1" />
-                  <Skeleton className="h-9 flex-1" />
-                  <Skeleton className="h-9 w-9" />
-                </div>
+              ))}
+            </div>
+          ) : filteredMachines.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-center py-16">
+              <div className="flex h-20 w-20 items-center justify-center rounded-full bg-muted mb-4">
+                {searchQuery ? (
+                  <Search className="h-10 w-10 text-muted-foreground" />
+                ) : (
+                  <Settings2 className="h-10 w-10 text-muted-foreground" />
+                )}
               </div>
-            ))}
-          </div>
-        ) : filteredMachines.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center py-16">
-            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-muted mb-4">
-              {searchQuery ? (
-                <Search className="h-10 w-10 text-muted-foreground" />
-              ) : (
-                <Settings2 className="h-10 w-10 text-muted-foreground" />
+              <h2 className="text-xl font-semibold mb-2">
+                {searchQuery ? "No Machines Found" : "No Machines Yet"}
+              </h2>
+              <p className="text-muted-foreground mb-6 max-w-md">
+                {searchQuery 
+                  ? `No machines match "${searchQuery}". Try a different search term.`
+                  : "Add your first machine to start tracking production status and metrics"
+                }
+              </p>
+              {!searchQuery && (
+                <Button onClick={handleAddMachine} className="gap-2" data-testid="button-add-first-machine">
+                  <Plus className="h-4 w-4" />
+                  Add Your First Machine
+                </Button>
               )}
             </div>
-            <h2 className="text-xl font-semibold mb-2">
-              {searchQuery ? "No Machines Found" : "No Machines Yet"}
-            </h2>
-            <p className="text-muted-foreground mb-6 max-w-md">
-              {searchQuery 
-                ? `No machines match "${searchQuery}". Try a different search term.`
-                : "Add your first machine to start tracking production status and metrics"
-              }
-            </p>
-            {!searchQuery && (
-              <Button onClick={handleAddMachine} className="gap-2" data-testid="button-add-first-machine">
-                <Plus className="h-4 w-4" />
-                Add Your First Machine
-              </Button>
-            )}
-          </div>
-        ) : (
-          <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {filteredMachines.map((machine) => {
-              // Calculate total downtime for this machine in current shift
-              const machineDowntimeMinutes = downtimeLogs
-                .filter(log => log.machineId === machine.id)
-                .reduce((sum, log) => sum + (log.duration || 0), 0);
-              const runtimeMinutes = Math.max(plannedRuntimeMinutes - machineDowntimeMinutes, 0);
-              // Calculate if production stats have been submitted today for this machine and shift
-              const today = estTime.toISOString().slice(0, 10);
-              const isSubmittedToday = productionStats.some(
-                s => s.machineId === machine.id && s.date === today && s.shift === selectedShift
-              );
-              const machineDowntime = getActiveDowntimeForMachine(machine.id);
-              return (
-                <MachineStatusCard
-                  key={machine.id}
-                  machine={machine}
-                  operator={getOperatorById(machine.operatorId)}
-                  downtimeLogs={downtimeLogs}
-                  plannedRuntimeMinutes={runtimeMinutes}
-                  onStatusChange={handleStatusChange}
-                  onAssignOperator={handleAssignOperator}
-                  onLogMaintenance={handleLogMaintenance}
-                  onLogDowntime={handleLogDowntime}
-                  onEditMachine={handleEditMachine}
-                  onSubmitStats={handleSubmitStats}
-                  onDeleteStats={handleDeleteStats}
-                  onUpdateStatusUpdate={(machineId, statusUpdate) => 
-                    updateStatusUpdateMutation.mutate({ machineId, statusUpdate })
-                  }
-                  isSubmittedToday={isSubmittedToday}
-                  isPendingSubmit={submitProductionStatMutation.isPending}
-                  isPendingDelete={deleteProductionStatsMutation.isPending}
-                  isPendingStatusUpdate={updateStatusUpdateMutation.isPending}
-                  activeDowntime={machineDowntime}
-                  onResolveDowntime={handleResolveDowntime}
-                />
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Dialogs */}
-      <MachineDialog
-        open={machineDialogOpen}
-        onOpenChange={setMachineDialogOpen}
-        machine={editingMachine}
-        onSubmit={handleMachineSubmit}
-        isPending={createMachineMutation.isPending || updateMachineMutation.isPending}
-      />
-
+          ) : (
+            <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {filteredMachines.map((machine) => {
+                // Calculate total downtime for this machine in current shift
+                const machineDowntimeMinutes = downtimeLogs
+                  .filter(log => log.machineId === machine.id)
+                  .reduce((sum, log) => sum + (log.duration || 0), 0);
+                // Strictly sanitize runtime: always number or undefined, never null
+                let runtimeMinutes: number | undefined = Math.max(plannedRuntimeMinutes - machineDowntimeMinutes, 0);
+                if (runtimeMinutes === null || isNaN(runtimeMinutes)) runtimeMinutes = undefined;
+                // Calculate if production stats have been submitted today for this machine and shift
+                const today = estTime.toISOString().slice(0, 10);
+                const isSubmittedToday = productionStats.some(
+                  s => s.machineId === machine.id && s.date === today && s.shift === selectedShift
+                );
+                const machineDowntime = getActiveDowntimeForMachine(machine.id);
+                const machineWithRuntime = { ...machine, runtime: runtimeMinutes };
+                return (
+                  <MachineStatusCard
+                    key={machine.id}
+                    machine={machineWithRuntime}
+                    operator={getOperatorById(machine.operatorId)}
+                    downtimeLogs={downtimeLogs}
+                    plannedRuntimeMinutes={runtimeMinutes}
+                    onStatusChange={handleStatusChange}
+                    onAssignOperator={handleAssignOperator}
+                    onRemoveOperator={machineId => handleOperatorAssign(machineId, null)}
+                    onLogMaintenance={handleLogMaintenance}
+                    onLogDowntime={handleLogDowntime}
+                    onEditMachine={m => {
+                      // Remove runtime if null or undefined for type compatibility
+                      const mCopy = { ...m };
+                      if (mCopy.runtime === null || mCopy.runtime === undefined) {
+                        delete mCopy.runtime;
+                      }
+                      handleEditMachine(mCopy as Machine);
+                    }}
+                    onSubmitStats={handleSubmitStats}
+                    onDeleteStats={handleDeleteStats}
+                    onUpdateStatusUpdate={(machineId, statusUpdate) => 
+                      updateStatusUpdateMutation.mutate({ id: machineId, statusUpdate })
+                    }
+                    isSubmittedToday={isSubmittedToday}
+                    isPendingSubmit={submitProductionStatMutation.isPending}
+                    isPendingDelete={deleteProductionStatsMutation.isPending}
+                    isPendingStatusUpdate={updateStatusUpdateMutation.isPending}
+                    activeDowntime={machineDowntime}
+                    onResolveDowntime={handleResolveDowntime}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </div>
+      {/* Dialogs - move outside the grid rendering */}
       <MaintenanceDialog
         open={maintenanceDialogOpen}
         onOpenChange={setMaintenanceDialogOpen}
@@ -659,7 +828,6 @@ export default function Dashboard() {
         onSubmit={(data) => createMaintenanceMutation.mutate(data)}
         isPending={createMaintenanceMutation.isPending}
       />
-
       <AssignOperatorDialog
         open={assignDialogOpen}
         onOpenChange={setAssignDialogOpen}
@@ -668,7 +836,6 @@ export default function Dashboard() {
         onAssign={handleOperatorAssign}
         isPending={assignOperatorMutation.isPending}
       />
-
       <DowntimeDialog
         open={downtimeDialogOpen}
         onOpenChange={setDowntimeDialogOpen}
@@ -677,7 +844,6 @@ export default function Dashboard() {
         onSubmit={(data) => createDowntimeMutation.mutate(data)}
         isPending={createDowntimeMutation.isPending}
       />
-
       <ResolveDowntimeDialog
         open={resolveDialogOpen}
         onOpenChange={setResolveDialogOpen}

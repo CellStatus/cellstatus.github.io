@@ -62,6 +62,8 @@ export const machines = pgTable("machines", {
   idealCycleTime: real("ideal_cycle_time"),
   goodPartsRan: integer("good_parts_ran").default(0),
   scrapParts: integer("scrap_parts").default(0),
+  // Runtime in minutes (optional, for UPH calculation)
+  runtime: integer("runtime"), // will be undefined if not set
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
   createdBy: varchar("created_by"),
@@ -70,7 +72,7 @@ export const machines = pgTable("machines", {
 
 export const insertMachineSchema = createInsertSchema(machines).omit({ id: true, createdAt: true, updatedAt: true, createdBy: true, updatedBy: true });
 export type InsertMachine = z.infer<typeof insertMachineSchema>;
-export type Machine = typeof machines.$inferSelect;
+export type Machine = Omit<typeof machines.$inferSelect, 'runtime'> & { runtime?: number };
 
 // Maintenance logs table
 export const maintenanceLogs = pgTable("maintenance_logs", {

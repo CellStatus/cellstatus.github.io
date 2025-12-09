@@ -36,12 +36,13 @@ import type { Machine, MachineStatus, Operator, DowntimeLog } from "@shared/sche
 import { downtimeReasonCodes } from "@shared/schema";
 
 interface MachineStatusCardProps {
-  machine: Machine;
+  machine: Machine & { runtime?: number };
   operator?: Operator;
   downtimeLogs?: DowntimeLog[];
   plannedRuntimeMinutes?: number;
   onStatusChange: (machineId: string, status: MachineStatus) => void;
   onAssignOperator: (machineId: string) => void;
+  onRemoveOperator: (machineId: string) => void;
   onLogMaintenance: (machineId: string) => void;
   onLogDowntime: (machineId: string) => void;
   onEditMachine: (machine: Machine) => void;
@@ -101,6 +102,7 @@ export function MachineStatusCard({
   plannedRuntimeMinutes = 0,
   onStatusChange,
   onAssignOperator,
+  onRemoveOperator,
   onLogMaintenance,
   onLogDowntime,
   onEditMachine,
@@ -117,37 +119,48 @@ export function MachineStatusCard({
   const status = statusConfig[machine.status];
   const StatusIcon = status.icon;
   
-  // Calculate OEE with downtime-based runtime using APQ
-  const machineDowntime = downtimeLogs
-    .filter((log) => log.machineId === machine.id)
-    .reduce((sum, log) => sum + (log.duration || 0), 0);
-  const actualRuntime = 420 - machineDowntime;
-  
-  let oee: number | null = null;
-  // Calculate OEE metrics with proper unit conversion
-  if (machine.idealCycleTime && actualRuntime > 0) {
+  // Live metrics: recalculate every minute
+  const getESTDate = () => new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
+  const [metrics, setMetrics] = useState(() => calculateMetrics());
+
+  function calculateMetrics() {
+    const estNow = getESTDate();
+    // Assume shift starts at 6:30am local time
+    const shiftStart = new Date(estNow);
+    shiftStart.setHours(6, 30, 0, 0);
+    if (estNow < shiftStart) {
+      // If before 6:30am, shift started yesterday
+      shiftStart.setDate(shiftStart.getDate() - 1);
+    }
+    const elapsedShiftMinutes = Math.max(Math.floor((estNow.getTime() - shiftStart.getTime()) / 60000), 1); // avoid div0
+    const machineDowntime = downtimeLogs
+      .filter((log) => log.machineId === machine.id)
+      .reduce((sum, log) => sum + (log.duration || 0), 0);
+    // Use machine.runtime if available, otherwise fallback
+    const runtimeMinutes = typeof machine.runtime === 'number' && machine.runtime > 0
+      ? machine.runtime
+      : Math.max(elapsedShiftMinutes - machineDowntime, 0);
     const totalParts = (machine.goodPartsRan || 0) + (machine.scrapParts || 0);
-    
-    // Availability = Actual Runtime / Planned Runtime (420 min)
-    const availability = actualRuntime / 420;
-    
-    // Performance = (Actual Output × Ideal Cycle Time) / Actual Runtime
-    // Convert runtime to seconds to match cycle time units
-    const actualRuntimeSeconds = actualRuntime * 60;
-    const performance = totalParts > 0 
-      ? ((totalParts * machine.idealCycleTime) / actualRuntimeSeconds) 
+    const availability = elapsedShiftMinutes > 0 ? (runtimeMinutes / elapsedShiftMinutes) * 100 : 0;
+    const performance = (machine.idealCycleTime && runtimeMinutes > 0 && totalParts > 0)
+      ? (((totalParts * machine.idealCycleTime) / (runtimeMinutes * 60)) * 100)
       : 0;
-    
-    // Quality = Good Parts / Total Parts
-    const quality = totalParts > 0 
-      ? (machine.goodPartsRan || 0) / totalParts 
-      : 0;
-    
-    // OEE = Availability × Performance × Quality × 100
-    oee = availability * performance * quality * 100;
+    const quality = totalParts > 0 ? ((machine.goodPartsRan || 0) / totalParts) * 100 : 0;
+      const oee = (availability / 100) * (performance / 100) * (quality / 100) * 100; // correct OEE formula
+    const uph = runtimeMinutes > 0 ? totalParts / (runtimeMinutes / 60) : 0;
+    return { availability, performance, quality, oee, uph, actualRuntime: runtimeMinutes, elapsedShiftMinutes };
   }
+
+  useEffect(() => {
+    setMetrics(calculateMetrics());
+    const interval = setInterval(() => setMetrics(calculateMetrics()), 60000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line
+  }, [machine, downtimeLogs]);
   
-  const [statusUpdate, setStatusUpdate] = useState(machine.statusUpdate || "");
+  // (OEE and related metrics now come from metrics object)
+  
+  const [statusUpdate, setStatusUpdate] = useState("");
   const [isEditingStatus, setIsEditingStatus] = useState(false);
   const [editingOeeMetrics, setEditingOeeMetrics] = useState(false);
   const [editGoodParts, setEditGoodParts] = useState(machine.goodPartsRan?.toString() || "0");
@@ -155,14 +168,25 @@ export function MachineStatusCard({
   const [editCycleTime, setEditCycleTime] = useState(machine.idealCycleTime?.toString() || "");
   
   useEffect(() => {
-    setStatusUpdate(machine.statusUpdate || "");
-  }, [machine.statusUpdate]);
+    setStatusUpdate("");
+  }, [machine.id]);
+
+  // Only reset OEE fields when starting to edit a new machine or when opening the editor
+  useEffect(() => {
+    if (editingOeeMetrics) {
+      setEditGoodParts(machine.goodPartsRan?.toString() || "0");
+      setEditScrapParts(machine.scrapParts?.toString() || "0");
+      setEditCycleTime(machine.idealCycleTime?.toString() || "");
+    }
+  }, [editingOeeMetrics]);
 
   useEffect(() => {
-    setEditGoodParts(machine.goodPartsRan?.toString() || "0");
-    setEditScrapParts(machine.scrapParts?.toString() || "0");
-    setEditCycleTime(machine.idealCycleTime?.toString() || "");
-  }, [machine]);
+    if (!editingOeeMetrics) {
+      setEditGoodParts(machine.goodPartsRan?.toString() || "0");
+      setEditScrapParts(machine.scrapParts?.toString() || "0");
+      setEditCycleTime(machine.idealCycleTime?.toString() || "");
+    }
+  }, [machine.id]);
 
   // Live downtime counter
   const [downtimeDuration, setDowntimeDuration] = useState<string>("");
@@ -221,6 +245,7 @@ export function MachineStatusCard({
                 <span className="ml-1 h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
               )}
             </Badge>
+            {/* Assign Operator button removed */}
           </div>
         </div>
         <DropdownMenu>
@@ -230,10 +255,7 @@ export function MachineStatusCard({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => onAssignOperator(machine.id)} data-testid={`button-assign-operator-${machine.id}`}>
-              <UserCircle className="mr-2 h-4 w-4" />
-              Assign Operator
-            </DropdownMenuItem>
+            {/* Removed Assign Operator menu item */}
             <DropdownMenuItem onClick={() => onLogMaintenance(machine.id)} data-testid={`button-log-maintenance-${machine.id}`}>
               <Wrench className="mr-2 h-4 w-4" />
               Log Maintenance
@@ -246,6 +268,55 @@ export function MachineStatusCard({
         </DropdownMenu>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* Operator Section */}
+        <div className="flex items-center gap-3">
+          {operator ? (
+            <>
+              <Avatar className="h-8 w-8">
+                <AvatarFallback className="text-xs font-medium bg-primary/10 text-primary">
+                  {operator.initials}
+                </AvatarFallback>
+              </Avatar>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate" data-testid={`text-operator-name-${machine.id}`}>
+                  {operator.name}
+                </p>
+                <p className="text-xs text-muted-foreground">{operator.shift} Shift</p>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="ml-2"
+                onClick={() => onRemoveOperator(machine.id)}
+                title="Remove Operator"
+                data-testid={`button-remove-operator-${machine.id}`}
+              >
+                <Trash2 className="h-4 w-4 text-destructive" />
+              </Button>
+            </>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full gap-2"
+              onClick={() => onAssignOperator(machine.id)}
+              data-testid={`button-assign-operator-empty-${machine.id}`}
+            >
+              <UserCircle className="h-4 w-4" />
+              Assign Operator
+            </Button>
+          )}
+        </div>
+
+        {/* Units Per Hour (UPH) */}
+        <div className="mt-1">
+          <p className="text-xs text-muted-foreground mb-1">Units Per Hour (UPH)</p>
+          <Badge variant="outline" className="w-full justify-center text-xs font-semibold">
+            {metrics.actualRuntime > 0
+              ? metrics.uph.toFixed(1)
+              : "—"}
+          </Badge>
+        </div>
         {/* Active Downtime Indicator */}
         {activeDowntime && (
           <div className="rounded-md bg-machine-down/10 border border-machine-down/30 p-3">
@@ -271,36 +342,6 @@ export function MachineStatusCard({
             </Button>
           </div>
         )}
-
-        {/* Operator Section */}
-        <div className="flex items-center gap-3">
-          {operator ? (
-            <>
-              <Avatar className="h-8 w-8">
-                <AvatarFallback className="text-xs font-medium bg-primary/10 text-primary">
-                  {operator.initials}
-                </AvatarFallback>
-              </Avatar>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate" data-testid={`text-operator-name-${machine.id}`}>
-                  {operator.name}
-                </p>
-                <p className="text-xs text-muted-foreground">{operator.shift} Shift</p>
-              </div>
-            </>
-          ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full gap-2"
-              onClick={() => onAssignOperator(machine.id)}
-              data-testid={`button-assign-operator-empty-${machine.id}`}
-            >
-              <UserCircle className="h-4 w-4" />
-              Assign Operator
-            </Button>
-          )}
-        </div>
 
         {/* OEE Metrics */}
         <div className="space-y-3">
@@ -421,14 +462,14 @@ export function MachineStatusCard({
               <div>
                 <p className="text-xs text-muted-foreground mb-1">Availability</p>
                 <Badge variant="outline" className="w-full justify-center text-xs font-semibold">
-                  {actualRuntime >= 0 ? ((actualRuntime / 420) * 100).toFixed(1) : "—"}%
+                  {metrics.actualRuntime >= 0 && metrics.elapsedShiftMinutes > 0 ? ((metrics.actualRuntime / metrics.elapsedShiftMinutes) * 100).toFixed(1) : "—"}%
                 </Badge>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground mb-1">Performance</p>
                 <Badge variant="outline" className="w-full justify-center text-xs font-semibold">
-                  {machine.idealCycleTime && actualRuntime > 0
-                    ? ((((machine.goodPartsRan || 0) + (machine.scrapParts || 0)) * machine.idealCycleTime) / (actualRuntime * 60) * 100).toFixed(1)
+                  {machine.idealCycleTime && metrics.actualRuntime > 0 && ((machine.goodPartsRan || 0) + (machine.scrapParts || 0)) > 0
+                    ? ((((machine.goodPartsRan || 0) + (machine.scrapParts || 0)) * machine.idealCycleTime) / (metrics.actualRuntime * 60) * 100).toFixed(1)
                     : "—"}%
                 </Badge>
               </div>
@@ -442,8 +483,8 @@ export function MachineStatusCard({
               </div>
               <div>
                 <p className="text-xs text-muted-foreground mb-1">OEE</p>
-                <Badge className="w-full justify-center text-xs font-semibold" variant={oee !== null ? "default" : "secondary"}>
-                  {oee !== null ? oee.toFixed(1) : "—"}%
+                <Badge className="w-full justify-center text-xs font-semibold" variant={metrics.oee !== null ? "default" : "secondary"}>
+                  {metrics.oee !== null ? metrics.oee.toFixed(1) : "—"}%
                 </Badge>
               </div>
             </div>
@@ -467,7 +508,7 @@ export function MachineStatusCard({
             data-testid={`textarea-status-update-${machine.id}`}
             disabled={isPendingStatusUpdate}
           />
-          {isEditingStatus && statusUpdate !== (machine.statusUpdate || "") && (
+          {isEditingStatus && statusUpdate !== "" && (
             <Button
               variant="outline"
               size="sm"
@@ -574,11 +615,7 @@ export function MachineStatusCard({
         )}
 
         {/* Last Updated */}
-        {machine.lastUpdated && (
-          <p className="text-xs text-muted-foreground text-center" data-testid={`text-last-updated-${machine.id}`}>
-            Updated {machine.lastUpdated}
-          </p>
-        )}
+        {/* Last Updated removed: not present in type */}
       </CardContent>
     </Card>
   );
