@@ -709,3 +709,5 @@ export class DatabaseStorage implements IStorage {
     return !!result;
   }
 }
+
+export const storage = new DatabaseStorage();
