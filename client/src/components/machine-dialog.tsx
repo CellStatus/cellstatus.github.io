@@ -32,16 +32,33 @@ import type { Machine } from "@shared/schema";
 const machineFormSchema = z.object({
   name: z.string().min(1, "Machine name is required"),
   machineId: z.string().min(1, "Machine ID is required"),
+  cell: z.string().optional().or(z.literal("")),
   status: z.enum(["running", "idle", "maintenance", "down", "setup"]),
+  idealCycleTime: z.coerce.number().positive().optional().or(z.literal("")),
+  setupTime: z.coerce.number().min(0).optional().or(z.literal("")),
+  batchSize: z.coerce.number().int().positive().optional().or(z.literal("")),
+  uptimePercent: z.coerce.number().min(0).max(100).optional().or(z.literal("")),
 });
 
 type MachineFormValues = z.infer<typeof machineFormSchema>;
+
+// Cleaned up type for submission (empty strings converted to undefined)
+export type MachineSubmitData = {
+  name: string;
+  machineId: string;
+  cell?: string;
+  status: "running" | "idle" | "maintenance" | "down" | "setup";
+  idealCycleTime?: number;
+  setupTime?: number;
+  batchSize?: number;
+  uptimePercent?: number;
+};
 
 interface MachineDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   machine?: Machine | null;
-  onSubmit: (data: MachineFormValues) => void;
+  onSubmit: (data: MachineSubmitData) => void;
   isPending: boolean;
 }
 
@@ -59,7 +76,12 @@ export function MachineDialog({
     defaultValues: {
       name: "",
       machineId: "",
+      cell: "",
       status: "idle",
+      idealCycleTime: "",
+      setupTime: "",
+      batchSize: "",
+      uptimePercent: "",
     },
   });
 
@@ -69,20 +91,41 @@ export function MachineDialog({
         form.reset({
           name: machine.name,
           machineId: machine.machineId,
+          cell: machine.cell ?? "",
           status: machine.status,
+          idealCycleTime: machine.idealCycleTime ?? "",
+          setupTime: machine.setupTime ?? "",
+          batchSize: machine.batchSize ?? "",
+          uptimePercent: machine.uptimePercent ?? "",
         });
       } else {
         form.reset({
           name: "",
           machineId: "",
+          cell: "",
           status: "idle",
+          idealCycleTime: "",
+          setupTime: "",
+          batchSize: "",
+          uptimePercent: "",
         });
       }
     }
   }, [open, machine, form]);
 
   const handleSubmit = (data: MachineFormValues) => {
-    onSubmit(data);
+    // Convert empty strings to undefined for optional number fields
+    const submitData: MachineSubmitData = {
+      name: data.name,
+      machineId: data.machineId,
+      cell: data.cell === "" ? undefined : data.cell,
+      status: data.status,
+      idealCycleTime: data.idealCycleTime === "" ? undefined : Number(data.idealCycleTime),
+      setupTime: data.setupTime === "" ? undefined : Number(data.setupTime),
+      batchSize: data.batchSize === "" ? undefined : Number(data.batchSize),
+      uptimePercent: data.uptimePercent === "" ? undefined : Number(data.uptimePercent),
+    };
+    onSubmit(submitData);
   };
 
   return (
@@ -140,6 +183,24 @@ export function MachineDialog({
 
             <FormField
               control={form.control}
+              name="cell"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Cell</FormLabel>
+                  <FormControl>
+                    <Input 
+                      placeholder="e.g., Cell A, Assembly Line 1" 
+                      {...field} 
+                      data-testid="input-machine-cell"
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
               name="status"
               render={({ field }) => (
                 <FormItem>
@@ -162,6 +223,94 @@ export function MachineDialog({
                 </FormItem>
               )}
             />
+
+            {/* VSM Data Fields */}
+            <div className="border-t pt-4 mt-4">
+              <p className="text-sm font-medium mb-3">VSM Data (optional)</p>
+              <div className="grid grid-cols-2 gap-3">
+                <FormField
+                  control={form.control}
+                  name="idealCycleTime"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs">Cycle Time (s)</FormLabel>
+                      <FormControl>
+                        <Input 
+                          type="number"
+                          min="0"
+                          step="0.1"
+                          placeholder="e.g., 15"
+                          {...field}
+                          value={field.value ?? ""}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="setupTime"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs">Setup Time (s)</FormLabel>
+                      <FormControl>
+                        <Input 
+                          type="number"
+                          min="0"
+                          step="1"
+                          placeholder="e.g., 300"
+                          {...field}
+                          value={field.value ?? ""}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="batchSize"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs">Pcs/Setup</FormLabel>
+                      <FormControl>
+                        <Input 
+                          type="number"
+                          min="1"
+                          step="1"
+                          placeholder="e.g., 100"
+                          {...field}
+                          value={field.value ?? ""}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="uptimePercent"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs">Reliability %</FormLabel>
+                      <FormControl>
+                        <Input 
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="1"
+                          placeholder="e.g., 95"
+                          {...field}
+                          value={field.value ?? ""}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+            </div>
 
             <div className="flex justify-end gap-3 pt-4">
               <Button

@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
+import { useLocation, useSearch } from 'wouter';
 import { Plus, Trash2, ChevronDown, ChevronUp, AlertTriangle, Download, Factory, ArrowRight, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { apiRequest, queryClient } from '@/lib/queryClient';
 import { useToast } from '@/hooks/use-toast';
-import type { Machine } from '@shared/schema';
+import type { Machine, VsmConfiguration } from '@shared/schema';
 
 interface Station {
   id: string;
@@ -36,17 +37,49 @@ interface StationMetrics extends Station {
 
 export default function VSMBuilder() {
   const { toast } = useToast();
+  const searchString = useSearch();
+  const [, setLocation] = useLocation();
+  
   const [stations, setStations] = useState<Station[]>([]);
   const [showConfig, setShowConfig] = useState(true);
   const [showMachineSelector, setShowMachineSelector] = useState(false);
   const [vsmName, setVsmName] = useState('');
   const [vsmDescription, setVsmDescription] = useState('');
   const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [loadedVsmId, setLoadedVsmId] = useState<string | null>(null);
+  const [vsmStatus, setVsmStatus] = useState('');
+  const [vsmNotes, setVsmNotes] = useState('');
+
+  // Parse VSM ID from URL query params
+  const vsmIdFromUrl = new URLSearchParams(searchString).get('id');
 
   // Fetch machines from database
   const { data: machines = [], isLoading } = useQuery<Machine[]>({
     queryKey: ['/api/machines'],
   });
+
+  // Fetch specific VSM configuration if ID is in URL
+  const { data: loadedVsm } = useQuery<VsmConfiguration>({
+    queryKey: [`/api/vsm-configurations/${vsmIdFromUrl}`],
+    enabled: !!vsmIdFromUrl,
+  });
+
+  // Load VSM data when fetched
+  useEffect(() => {
+    if (loadedVsm && loadedVsm.id !== loadedVsmId) {
+      setLoadedVsmId(loadedVsm.id);
+      setVsmName(loadedVsm.name);
+      setVsmDescription(loadedVsm.description || '');
+      setVsmStatus(loadedVsm.status || '');
+      setVsmNotes(loadedVsm.notes || '');
+      
+      // Parse stations from JSON
+      const stationsData = loadedVsm.stationsJson as Station[];
+      if (Array.isArray(stationsData)) {
+        setStations(stationsData);
+      }
+    }
+  }, [loadedVsm, loadedVsmId]);
 
   // Save VSM mutation
   const saveVsmMutation = useMutation({
@@ -57,6 +90,8 @@ export default function VSMBuilder() {
       setShowSaveDialog(false);
       setVsmName('');
       setVsmDescription('');
+      setVsmStatus('');
+      setVsmNotes('');
       setStations([]);
     },
     onError: () => {
@@ -78,20 +113,19 @@ export default function VSMBuilder() {
     saveVsmMutation.mutate({
       name: vsmName,
       description: vsmDescription,
+      status: vsmStatus,
+      notes: vsmNotes,
       stationsJson: stations,
       bottleneckRate,
       processEfficiency
     });
   };
 
-  // Fetch machines from database
-  const { data: machines = [], isLoading } = useQuery<Machine[]>({
-    queryKey: ['/api/machines'],
-  });
-
   const addMachineToVSM = (machine: Machine) => {
-    // Use machine's ideal cycle time or default to 10 seconds
+    // Use machine's VSM data or defaults
     const cycleTime = machine.idealCycleTime || 10;
+    const batchSize = machine.batchSize || 10;
+    const uptimePercent = machine.uptimePercent || 100;
     
     setStations([...stations, {
       id: crypto.randomUUID(),
@@ -100,8 +134,8 @@ export default function VSMBuilder() {
       cycleTime,
       operators: 1,
       setupTime: 0,
-      uptimePercent: 100,
-      batchSize: 10
+      uptimePercent,
+      batchSize
     }]);
     setShowMachineSelector(false);
   };
@@ -185,6 +219,13 @@ export default function VSMBuilder() {
 
   const reset = () => {
     setStations([]);
+    setVsmName('');
+    setVsmDescription('');
+    setLoadedVsmId(null);
+    // Clear URL param if present
+    if (vsmIdFromUrl) {
+      setLocation('/vsm-builder');
+    }
   };
 
   const exportVSM = () => {
@@ -340,15 +381,40 @@ END OF REPORT
 
   const { metrics, bottleneckRate, bottleneckIndex } = calculateMetrics();
 
+  const handleNewVsm = () => {
+    setStations([]);
+    setVsmName('');
+    setVsmDescription('');
+    setLoadedVsmId(null);
+    // Clear URL param
+    setLocation('/vsm-builder');
+  };
+
   return (
     <div className="h-full overflow-auto bg-background p-4">
       <div className="max-w-full mx-auto">
         <div className="flex justify-between items-center mb-4">
           <div>
             <h1 className="text-2xl font-bold">Value Stream Mapper</h1>
-            <p className="text-muted-foreground text-sm">Build your process flow from machines</p>
+            <p className="text-muted-foreground text-sm">
+              {loadedVsmId ? (
+                <>Viewing: <span className="font-medium text-purple-600">{vsmName}</span></>
+              ) : (
+                'Build your process flow from machines'
+              )}
+            </p>
           </div>
           <div className="flex gap-2">
+            {loadedVsmId && (
+              <Button
+                onClick={handleNewVsm}
+                variant="outline"
+                size="sm"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                New VSM
+              </Button>
+            )}
             <Button
               onClick={() => setShowSaveDialog(true)}
               disabled={stations.length === 0}
@@ -379,7 +445,7 @@ END OF REPORT
 
         {/* Save VSM Dialog */}
         {showSaveDialog && (
-          <Card className="mb-4 border-blue-200 bg-blue-50">
+          <Card className="mb-4 border-primary/50 bg-card">
             <CardHeader>
               <CardTitle className="text-lg">Save Value Stream Map</CardTitle>
             </CardHeader>
@@ -401,11 +467,21 @@ END OF REPORT
                     id="vsm-description"
                     value={vsmDescription}
                     onChange={(e) => setVsmDescription(e.target.value)}
-                    placeholder="Optional notes about this value stream"
+                    placeholder="Brief description of this value stream"
                     className="mt-1"
                   />
                 </div>
-                <div className="flex gap-2 justify-end">
+                <div>
+                  <Label htmlFor="vsm-status">Cell Status</Label>
+                  <Input
+                    id="vsm-status"
+                    value={vsmStatus}
+                    onChange={(e) => setVsmStatus(e.target.value)}
+                    placeholder="e.g., Running at 85% capacity, waiting on parts..."
+                    className="mt-1"
+                  />
+                </div>
+                <div className="flex gap-2 justify-end pt-2">
                   <Button
                     onClick={() => setShowSaveDialog(false)}
                     variant="outline"
@@ -444,30 +520,55 @@ END OF REPORT
               <>
                 <p className="text-sm text-muted-foreground mb-4">
                   Select machines from your shop floor to build the value stream, or add custom stations.
-                  Drag and reorder them to match your process flow.
+                  Machines are grouped by cell.
                 </p>
-                <div className="flex flex-wrap gap-2 mb-4">
-                  {machines.map((machine) => {
-                    const alreadyAdded = stations.some(s => s.machineId === machine.id);
-                    return (
-                      <Button
-                        key={machine.id}
-                        onClick={() => addMachineToVSM(machine)}
-                        disabled={alreadyAdded}
-                        variant={alreadyAdded ? "outline" : "default"}
-                        size="sm"
-                        className="gap-2"
-                      >
-                        <Factory className="h-4 w-4" />
-                        {machine.name}
-                        {alreadyAdded && <Badge variant="secondary" className="ml-1">Added</Badge>}
-                      </Button>
-                    );
-                  })}
-                  {machines.length === 0 && (
-                    <p className="text-sm text-muted-foreground">No machines found. Create machines first or add custom stations below.</p>
-                  )}
-                </div>
+                {/* Group machines by cell */}
+                {(() => {
+                  const machinesByCell = machines.reduce((acc, machine) => {
+                    const cellName = machine.cell || 'Unassigned';
+                    if (!acc[cellName]) acc[cellName] = [];
+                    acc[cellName].push(machine);
+                    return acc;
+                  }, {} as Record<string, typeof machines>);
+                  
+                  // Sort cell names alphabetically, but keep "Unassigned" at the end
+                  const sortedCells = Object.keys(machinesByCell).sort((a, b) => {
+                    if (a === 'Unassigned') return 1;
+                    if (b === 'Unassigned') return -1;
+                    return a.localeCompare(b);
+                  });
+                  
+                  return sortedCells.map(cellName => (
+                    <div key={cellName} className="mb-4">
+                      <div className="text-sm font-medium text-muted-foreground mb-2 flex items-center gap-2">
+                        <Badge variant="outline">{cellName}</Badge>
+                        <span className="text-xs">({machinesByCell[cellName].length} machines)</span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {machinesByCell[cellName].map((machine) => {
+                          const alreadyAdded = stations.some(s => s.machineId === machine.id);
+                          return (
+                            <Button
+                              key={machine.id}
+                              onClick={() => addMachineToVSM(machine)}
+                              disabled={alreadyAdded}
+                              variant={alreadyAdded ? "outline" : "default"}
+                              size="sm"
+                              className="gap-2"
+                            >
+                              <Factory className="h-4 w-4" />
+                              {machine.name}
+                              {alreadyAdded && <Badge variant="secondary" className="ml-1">Added</Badge>}
+                            </Button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ));
+                })()}
+                {machines.length === 0 && (
+                  <p className="text-sm text-muted-foreground">No machines found. Create machines first or add custom stations below.</p>
+                )}
                 <Button
                   onClick={addCustomStation}
                   variant="outline"

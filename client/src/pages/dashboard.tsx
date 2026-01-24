@@ -881,7 +881,6 @@ export default function Dashboard() {
             </div>
           </div>
         )}
-      </div>
 
       {/* Dialogs - move outside the grid rendering */}
       <MaintenanceDialog

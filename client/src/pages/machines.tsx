@@ -22,7 +22,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { MachineDialog } from "@/components/machine-dialog";
+import { MachineDialog, type MachineSubmitData } from "@/components/machine-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { 
@@ -54,10 +54,6 @@ export default function MachinesPage() {
 
   const { data: machines = [], isLoading } = useQuery<Machine[]>({
     queryKey: ["/api/machines"],
-  });
-
-  const { data: downtimeLogs = [] } = useQuery<any[]>({
-    queryKey: ["/api/downtime"],
   });
 
   const createMutation = useMutation({
@@ -114,7 +110,7 @@ export default function MachinesPage() {
     setDeleteConfirmOpen(true);
   };
 
-  const handleSubmit = (data: Record<string, unknown>) => {
+  const handleSubmit = (data: MachineSubmitData) => {
     if (editingMachine) {
       updateMutation.mutate({ id: editingMachine.id, ...data });
     } else {
@@ -169,13 +165,16 @@ export default function MachinesPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                              <TableHead>Machine</TableHead>
-                              <TableHead>ID</TableHead>
-                              <TableHead>Status</TableHead>
-                              <TableHead className="text-right">Good Parts</TableHead>
-                              <TableHead className="text-right">Scrap Parts</TableHead>
-                              <TableHead className="text-right">OEE</TableHead>
-                              <TableHead className="w-[100px]">Actions</TableHead>
+                    <TableHead>Machine</TableHead>
+                    <TableHead>ID</TableHead>
+                    <TableHead>Cell</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Cycle Time</TableHead>
+                    <TableHead className="text-right">Setup Time</TableHead>
+                    <TableHead className="text-right">Pcs/Setup</TableHead>
+                    <TableHead className="text-right">Reliability</TableHead>
+                    <TableHead className="text-right">Throughput (UPH)</TableHead>
+                    <TableHead className="w-[100px]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -183,34 +182,16 @@ export default function MachinesPage() {
                     const status = statusConfig[machine.status];
                     const StatusIcon = status.icon;
                     
-                    // Calculate actual runtime: 420 minutes (shift) - downtime
-                    const machineDowntime = downtimeLogs
-                      .filter((log) => log.machineId === machine.id)
-                      .reduce((sum, log) => sum + (log.duration || 0), 0);
-                    const actualRuntime = 420 - machineDowntime;
-                    
-                    // Calculate OEE using APQ (Availability × Performance × Quality)
-                    let oee: number | null = null;
-                    if (machine.idealCycleTime && actualRuntime > 0) {
-                      const totalParts = (machine.goodPartsRan || 0) + (machine.scrapParts || 0);
-                      
-                      // Availability = Actual Runtime / Planned Runtime (420 min)
-                      const availability = actualRuntime / 420;
-                      
-                      // Performance = (Actual Output × Ideal Cycle Time) / Actual Runtime
-                      // Convert runtime to seconds to match cycle time units
-                      const actualRuntimeSeconds = actualRuntime * 60;
-                      const performance = totalParts > 0 
-                        ? ((totalParts * machine.idealCycleTime) / actualRuntimeSeconds) 
+                    // Calculate throughput with reliability and setup time
+                    let throughput: number | null = null;
+                    if (machine.idealCycleTime && machine.idealCycleTime > 0) {
+                      const setupTimePerPiece = (machine.setupTime && machine.batchSize) 
+                        ? machine.setupTime / machine.batchSize 
                         : 0;
-                      
-                      // Quality = Good Parts / Total Parts
-                      const quality = totalParts > 0 
-                        ? (machine.goodPartsRan || 0) / totalParts 
-                        : 0;
-                      
-                      // OEE = Availability × Performance × Quality × 100
-                      oee = availability * performance * quality * 100;
+                      const effectiveCycleTime = machine.idealCycleTime + setupTimePerPiece;
+                      const theoretical = 3600 / effectiveCycleTime;
+                      const reliability = machine.uptimePercent ? machine.uptimePercent / 100 : 1;
+                      throughput = theoretical * reliability;
                     }
                     
                     return (
@@ -222,19 +203,34 @@ export default function MachinesPage() {
                           </Badge>
                         </TableCell>
                         <TableCell>
+                          {machine.cell ? (
+                            <Badge variant="secondary" className="text-xs">
+                              {machine.cell}
+                            </Badge>
+                          ) : (
+                            <span className="text-muted-foreground text-xs">--</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
                           <Badge className={`${status.className} border gap-1`}>
                             <StatusIcon className="h-3 w-3" />
                             {status.label}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right font-mono">
-                          {machine.goodPartsRan || 0}
+                          {machine.idealCycleTime ? `${machine.idealCycleTime}s` : "--"}
                         </TableCell>
                         <TableCell className="text-right font-mono">
-                          {machine.scrapParts || 0}
+                          {machine.setupTime ? `${machine.setupTime}s` : "--"}
                         </TableCell>
                         <TableCell className="text-right font-mono">
-                          {oee !== null ? `${oee.toFixed(1)}%` : "--"}
+                          {machine.batchSize || "--"}
+                        </TableCell>
+                        <TableCell className="text-right font-mono">
+                          {machine.uptimePercent ? `${machine.uptimePercent}%` : "--"}
+                        </TableCell>
+                        <TableCell className="text-right font-mono">
+                          {throughput !== null ? `${throughput.toFixed(0)}/hr` : "--"}
                         </TableCell>
                         <TableCell>
                           <div className="flex gap-1">

@@ -1,14 +1,9 @@
 import { Link, useLocation } from "wouter";
 import {
   LayoutDashboard,
-  Wrench,
-  Users,
-  Factory,
-  BarChart3,
-  AlertTriangle,
-  Trash2,
-  TrendingUp,
   GitBranch,
+  Settings2,
+  Factory,
 } from "lucide-react";
 import {
   Sidebar,
@@ -32,37 +27,7 @@ const navItems = [
   {
     title: "Machines",
     url: "/machines",
-    icon: Factory,
-  },
-  {
-    title: "Events",
-    url: "/events",
-    icon: LayoutDashboard,
-  },
-  {
-    title: "Team Members",
-    url: "/operators",
-    icon: Users,
-  },
-  {
-    title: "Maintenance",
-    url: "/maintenance",
-    icon: Wrench,
-  },
-  {
-    title: "Production Stats",
-    url: "/production-stats",
-    icon: TrendingUp,
-  },
-  {
-    title: "Downtime Incidents",
-    url: "/downtime",
-    icon: AlertTriangle,
-  },
-  {
-    title: "Reports",
-    url: "/reports",
-    icon: BarChart3,
+    icon: Settings2,
   },
   {
     title: "VSM Builder",
@@ -82,8 +47,8 @@ export function AppSidebar() {
             <Factory className="h-5 w-5" />
           </div>
           <div className="flex flex-col">
-            <span className="text-lg font-semibold" data-testid="text-app-title">Cell Status</span>
-            <span className="text-xs text-muted-foreground">Manufacturing</span>
+            <span className="text-lg font-semibold" data-testid="text-app-title">CellStatus</span>
+            <span className="text-xs text-muted-foreground">VSM Tool</span>
           </div>
         </Link>
       </SidebarHeader>
