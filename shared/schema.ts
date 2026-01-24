@@ -265,3 +265,29 @@ export const cellMachines = pgTable("cell_machines", {
 export const insertCellMachineSchema = createInsertSchema(cellMachines).omit({ id: true, createdAt: true });
 export type InsertCellMachine = z.infer<typeof insertCellMachineSchema>;
 export type CellMachine = typeof cellMachines.$inferSelect;
+
+// === VALUE STREAM MAPPING ===
+
+// VSM configurations table - stores value stream maps
+export const vsmConfigurations = pgTable("vsm_configurations", {
+  id: varchar("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  stationsJson: jsonb("stations_json").notNull(), // Array of VSM stations with machine links
+  bottleneckRate: real("bottleneck_rate"), // System throughput in units/sec
+  processEfficiency: real("process_efficiency"), // Overall efficiency percentage
+  notes: text("notes"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+  createdBy: varchar("created_by").notNull(),
+  updatedBy: varchar("updated_by"),
+});
+
+export const insertVsmConfigurationSchema = createInsertSchema(vsmConfigurations).omit({ 
+  id: true, 
+  createdAt: true, 
+  updatedAt: true, 
+  updatedBy: true 
+});
+export type InsertVsmConfiguration = z.infer<typeof insertVsmConfigurationSchema>;
+export type VsmConfiguration = typeof vsmConfigurations.$inferSelect;

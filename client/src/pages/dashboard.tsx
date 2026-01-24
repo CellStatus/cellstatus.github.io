@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MachineStatusCard } from "@/components/machine-status-card";
 import { MachineDialog } from "@/components/machine-dialog";
@@ -25,7 +26,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
-import type { Machine, Operator, MachineStatus, ProductionStat, DowntimeLog } from "@shared/schema";
+import type { Machine, Operator, MachineStatus, ProductionStat, DowntimeLog, VsmConfiguration } from "@shared/schema";
 import { calculateOEEStats } from "@/lib/oeeUtils";
 // Helper to get EST time
 function getESTDate() {
@@ -159,6 +160,12 @@ export default function Dashboard() {
         const { data: downtimeLogs = [] } = useQuery<DowntimeLog[]>({
           queryKey: ["/api/downtime"],
         });
+
+      // Fetch VSM configurations
+      const { data: vsmConfigurations = [], isLoading: vsmLoading } = useQuery<VsmConfiguration[]>({
+        queryKey: ["/api/vsm-configurations"],
+      });
+
       const [showScheduleSettings, setShowScheduleSettings] = useState(false);
     // Editable shift and break times
     const [shiftTimes, setShiftTimes] = useState(() => JSON.parse(localStorage.getItem("shiftTimes") || "null") || defaultShiftTimes);
@@ -822,6 +829,60 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+
+        {/* Value Stream Configurations Section */}
+        {vsmConfigurations.length > 0 && (
+          <div className="px-6 py-6 border-t">
+            <h2 className="text-xl font-semibold mb-4">Value Stream Maps</h2>
+            <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+              {vsmConfigurations.map((vsm) => (
+                <Card key={vsm.id} className="hover:shadow-lg transition">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">{vsm.name}</CardTitle>
+                    {vsm.description && (
+                      <p className="text-sm text-muted-foreground">{vsm.description}</p>
+                    )}
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    {vsm.bottleneckRate && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Throughput:</span>
+                        <span className="font-semibold">{vsm.bottleneckRate.toFixed(3)} units/sec</span>
+                      </div>
+                    )}
+                    {vsm.processEfficiency && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Efficiency:</span>
+                        <span className="font-semibold text-green-600">{vsm.processEfficiency.toFixed(0)}%</span>
+                      </div>
+                    )}
+                    {vsm.stationsJson && Array.isArray(vsm.stationsJson) && (
+                      <div className="text-sm">
+                        <span className="text-muted-foreground">Stations:</span>
+                        <p className="mt-1">{(vsm.stationsJson as any[]).length} process steps</p>
+                      </div>
+                    )}
+                    <div className="pt-2">
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        className="w-full"
+                        onClick={() => {
+                          // Could navigate to view/edit the VSM
+                          console.log('View VSM:', vsm.id);
+                        }}
+                      >
+                        View Details
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Dialogs - move outside the grid rendering */}
       <MaintenanceDialog
         open={maintenanceDialogOpen}

@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
-import { insertMachineSchema, insertOperatorSchema, insertMaintenanceLogSchema, insertDowntimeLogSchema, insertEventSchema, insertEventTaskSchema, insertEventMemberSchema, machineStatuses, users } from "@shared/schema";
+import { insertMachineSchema, insertOperatorSchema, insertMaintenanceLogSchema, insertDowntimeLogSchema, insertEventSchema, insertEventTaskSchema, insertEventMemberSchema, insertVsmConfigurationSchema, machineStatuses, users } from "@shared/schema";
 import { db } from "./db";
 import { z } from "zod";
 
@@ -1257,6 +1257,79 @@ export function registerEventRoutes(app: Express) {
       res.json({ success: ok });
     } catch (error) {
       res.status(500).json({ error: "Failed to remove event member" });
+    }
+  });
+
+  // === VSM CONFIGURATION ROUTES ===
+
+  // Get all VSM configurations
+  app.get("/api/vsm-configurations", async (_req, res) => {
+    try {
+      const vsms = await storage.getVsmConfigurations();
+      res.json(vsms);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch VSM configurations" });
+    }
+  });
+
+  // Get single VSM configuration
+  app.get("/api/vsm-configurations/:id", async (req, res) => {
+    try {
+      const vsm = await storage.getVsmConfiguration(req.params.id);
+      if (!vsm) {
+        return res.status(404).json({ error: "VSM configuration not found" });
+      }
+      res.json(vsm);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch VSM configuration" });
+    }
+  });
+
+  // Create new VSM configuration
+  app.post("/api/vsm-configurations", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub || 'local-dev-user';
+      const validated = insertVsmConfigurationSchema.parse({
+        ...req.body,
+        createdBy: userId,
+      });
+      const vsm = await storage.createVsmConfiguration(validated);
+      res.status(201).json(vsm);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid VSM configuration data", details: error.errors });
+      }
+      res.status(500).json({ error: "Failed to create VSM configuration" });
+    }
+  });
+
+  // Update VSM configuration
+  app.put("/api/vsm-configurations/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub || 'local-dev-user';
+      const vsm = await storage.updateVsmConfiguration(req.params.id, {
+        ...req.body,
+        updatedBy: userId,
+      });
+      if (!vsm) {
+        return res.status(404).json({ error: "VSM configuration not found" });
+      }
+      res.json(vsm);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update VSM configuration" });
+    }
+  });
+
+  // Delete VSM configuration
+  app.delete("/api/vsm-configurations/:id", isAuthenticated, async (req, res) => {
+    try {
+      const ok = await storage.deleteVsmConfiguration(req.params.id);
+      if (!ok) {
+        return res.status(404).json({ error: "VSM configuration not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete VSM configuration" });
     }
   });
 }

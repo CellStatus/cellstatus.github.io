@@ -65,8 +65,8 @@ const navItems = [
     icon: BarChart3,
   },
   {
-    title: "VSM Analyser",
-    url: "/vsm-analyser",
+    title: "VSM Builder",
+    url: "/vsm-builder",
     icon: GitBranch,
   },
 ];

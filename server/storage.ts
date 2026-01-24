@@ -9,8 +9,9 @@ import {
   type DowntimeCategory,
   type User,
   type UpsertUser,
+  type VsmConfiguration, type InsertVsmConfiguration,
   machines, operators, maintenanceLogs, productionStats, users, downtimeLogs,
-  events, eventTasks, eventMembers,
+  events, eventTasks, eventMembers, vsmConfigurations,
 } from "@shared/schema";
 import type { 
   Event as EventEntity, InsertEvent as InsertEventEntity,
@@ -84,6 +85,13 @@ export interface IStorage {
   getEventMembers(eventId: string): Promise<EventMemberEntity[]>;
   addEventMember(member: InsertEventMemberEntity): Promise<EventMemberEntity>;
   removeEventMember(eventId: string, operatorId: string): Promise<boolean>;
+
+  // VSM Configurations
+  getVsmConfigurations(): Promise<VsmConfiguration[]>;
+  getVsmConfiguration(id: string): Promise<VsmConfiguration | undefined>;
+  createVsmConfiguration(config: InsertVsmConfiguration): Promise<VsmConfiguration>;
+  updateVsmConfiguration(id: string, updates: Partial<InsertVsmConfiguration>): Promise<VsmConfiguration | undefined>;
+  deleteVsmConfiguration(id: string): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -662,6 +670,42 @@ export class DatabaseStorage implements IStorage {
     await db.delete(eventMembers).where(and(eq(eventMembers.eventId, eventId), eq(eventMembers.operatorId, operatorId)));
     return true;
   }
-}
 
-export const storage = new DatabaseStorage();
+  // VSM Configuration operations
+  async getVsmConfigurations(): Promise<VsmConfiguration[]> {
+    return await db.select().from(vsmConfigurations).orderBy(vsmConfigurations.updatedAt);
+  }
+
+  async getVsmConfiguration(id: string): Promise<VsmConfiguration | undefined> {
+    const result = await db.select().from(vsmConfigurations).where(eq(vsmConfigurations.id, id)).limit(1);
+    return result[0];
+  }
+
+  async createVsmConfiguration(config: InsertVsmConfiguration): Promise<VsmConfiguration> {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    await db.insert(vsmConfigurations).values({
+      id,
+      ...config,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const result = await db.select().from(vsmConfigurations).where(eq(vsmConfigurations.id, id)).limit(1);
+    return result[0]!;
+  }
+
+  async updateVsmConfiguration(id: string, updates: Partial<InsertVsmConfiguration>): Promise<VsmConfiguration | undefined> {
+    const now = new Date().toISOString();
+    await db.update(vsmConfigurations).set({
+      ...updates,
+      updatedAt: now,
+    }).where(eq(vsmConfigurations.id, id));
+    const result = await db.select().from(vsmConfigurations).where(eq(vsmConfigurations.id, id)).limit(1);
+    return result[0];
+  }
+
+  async deleteVsmConfiguration(id: string): Promise<boolean> {
+    const result = await db.delete(vsmConfigurations).where(eq(vsmConfigurations.id, id));
+    return !!result;
+  }
+}

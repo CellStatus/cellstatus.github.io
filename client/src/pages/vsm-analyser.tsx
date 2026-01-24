@@ -1,13 +1,14 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Plus, Trash2, ChevronDown, ChevronUp, AlertTriangle, Download, Factory, ArrowRight } from 'lucide-react';
+import { useQuery, useMutation } from '@tanstack/react-query';
+import { Plus, Trash2, ChevronDown, ChevronUp, AlertTriangle, Download, Factory, ArrowRight, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { apiRequest } from '@/lib/queryClient';
+import { apiRequest, queryClient } from '@/lib/queryClient';
+import { useToast } from '@/hooks/use-toast';
 import type { Machine } from '@shared/schema';
 
 interface Station {
@@ -33,10 +34,55 @@ interface StationMetrics extends Station {
   downtimeImpact: number;
 }
 
-export default function VSMAnalyser() {
+export default function VSMBuilder() {
+  const { toast } = useToast();
   const [stations, setStations] = useState<Station[]>([]);
   const [showConfig, setShowConfig] = useState(true);
   const [showMachineSelector, setShowMachineSelector] = useState(false);
+  const [vsmName, setVsmName] = useState('');
+  const [vsmDescription, setVsmDescription] = useState('');
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+
+  // Fetch machines from database
+  const { data: machines = [], isLoading } = useQuery<Machine[]>({
+    queryKey: ['/api/machines'],
+  });
+
+  // Save VSM mutation
+  const saveVsmMutation = useMutation({
+    mutationFn: (data: any) => apiRequest('POST', '/api/vsm-configurations', data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/vsm-configurations'] });
+      toast({ title: 'VSM saved successfully' });
+      setShowSaveDialog(false);
+      setVsmName('');
+      setVsmDescription('');
+      setStations([]);
+    },
+    onError: () => {
+      toast({ title: 'Failed to save VSM', variant: 'destructive' });
+    }
+  });
+
+  const handleSaveVSM = () => {
+    if (!vsmName.trim()) {
+      toast({ title: 'Please enter a VSM name', variant: 'destructive' });
+      return;
+    }
+
+    const { metrics, bottleneckRate } = calculateMetrics();
+    const processEfficiency = metrics.length > 0 
+      ? (bottleneckRate / Math.max(...metrics.map(m => m.rate))) * 100 
+      : 0;
+
+    saveVsmMutation.mutate({
+      name: vsmName,
+      description: vsmDescription,
+      stationsJson: stations,
+      bottleneckRate,
+      processEfficiency
+    });
+  };
 
   // Fetch machines from database
   const { data: machines = [], isLoading } = useQuery<Machine[]>({
@@ -304,6 +350,15 @@ END OF REPORT
           </div>
           <div className="flex gap-2">
             <Button
+              onClick={() => setShowSaveDialog(true)}
+              disabled={stations.length === 0}
+              variant="default"
+              size="sm"
+            >
+              <Save className="h-4 w-4 mr-2" />
+              Save VSM
+            </Button>
+            <Button
               onClick={exportVSM}
               disabled={metrics.length === 0}
               variant="default"
@@ -321,6 +376,55 @@ END OF REPORT
             </Button>
           </div>
         </div>
+
+        {/* Save VSM Dialog */}
+        {showSaveDialog && (
+          <Card className="mb-4 border-blue-200 bg-blue-50">
+            <CardHeader>
+              <CardTitle className="text-lg">Save Value Stream Map</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                <div>
+                  <Label htmlFor="vsm-name">VSM Name *</Label>
+                  <Input
+                    id="vsm-name"
+                    value={vsmName}
+                    onChange={(e) => setVsmName(e.target.value)}
+                    placeholder="e.g., Production Line A - Q1 2026"
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="vsm-description">Description</Label>
+                  <Input
+                    id="vsm-description"
+                    value={vsmDescription}
+                    onChange={(e) => setVsmDescription(e.target.value)}
+                    placeholder="Optional notes about this value stream"
+                    className="mt-1"
+                  />
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <Button
+                    onClick={() => setShowSaveDialog(false)}
+                    variant="outline"
+                    size="sm"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleSaveVSM}
+                    disabled={saveVsmMutation.isPending}
+                    size="sm"
+                  >
+                    {saveVsmMutation.isPending ? 'Saving...' : 'Save VSM'}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Machine Selector */}
         <Card className="mb-4">
@@ -392,19 +496,7 @@ END OF REPORT
               </Button>
             </CardHeader>
             <CardContent>
-              {/* Simple Flow Visualization */}
-              <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-2">
-                {stations.map((station, index) => (
-                  <div key={station.id} className="flex items-center gap-2">
-                    <Badge variant="outline" className="whitespace-nowrap">
-                      {index + 1}. {station.name}
-                    </Badge>
-                    {index < stations.length - 1 && <ArrowRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />}
-                  </div>
-                ))}
-              </div>
-
-              {/* Simple Flow Visualization */}
+              {/* Process Flow Visualization */}
               <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-2">
                 {stations.map((station, index) => (
                   <div key={station.id} className="flex items-center gap-2">
