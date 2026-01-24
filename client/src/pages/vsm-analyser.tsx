@@ -1,11 +1,18 @@
 import { useState } from 'react';
-import { Plus, Trash2, ChevronDown, ChevronUp, AlertTriangle, Download } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { Plus, Trash2, ChevronDown, ChevronUp, AlertTriangle, Download, Factory, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { apiRequest } from '@/lib/queryClient';
+import type { Machine } from '@shared/schema';
 
 interface Station {
-  id: number;
+  id: string;
+  machineId?: string; // Link to actual machine
   name: string;
   cycleTime: number;
   operators: number;
@@ -27,33 +34,49 @@ interface StationMetrics extends Station {
 }
 
 export default function VSMAnalyser() {
-  const [stations, setStations] = useState<Station[]>([
-    { id: 1, name: 'Cutting', cycleTime: 10, operators: 1, setupTime: 0, uptimePercent: 100, batchSize: 10 },
-    { id: 2, name: 'Drilling', cycleTime: 15, operators: 1, setupTime: 0, uptimePercent: 100, batchSize: 10 },
-    { id: 3, name: 'Assembly', cycleTime: 8, operators: 1, setupTime: 0, uptimePercent: 100, batchSize: 10 },
-    { id: 4, name: 'Packaging', cycleTime: 12, operators: 1, setupTime: 0, uptimePercent: 100, batchSize: 10 }
-  ]);
-  const [nextId, setNextId] = useState(5);
+  const [stations, setStations] = useState<Station[]>([]);
   const [showConfig, setShowConfig] = useState(true);
+  const [showMachineSelector, setShowMachineSelector] = useState(false);
 
-  const addStation = () => {
+  // Fetch machines from database
+  const { data: machines = [], isLoading } = useQuery<Machine[]>({
+    queryKey: ['/api/machines'],
+  });
+
+  const addMachineToVSM = (machine: Machine) => {
+    // Use machine's ideal cycle time or default to 10 seconds
+    const cycleTime = machine.idealCycleTime || 10;
+    
     setStations([...stations, {
-      id: nextId,
-      name: `Station ${nextId}`,
+      id: crypto.randomUUID(),
+      machineId: machine.id,
+      name: machine.name,
+      cycleTime,
+      operators: 1,
+      setupTime: 0,
+      uptimePercent: 100,
+      batchSize: 10
+    }]);
+    setShowMachineSelector(false);
+  };
+
+  const addCustomStation = () => {
+    setStations([...stations, {
+      id: crypto.randomUUID(),
+      name: `Station ${stations.length + 1}`,
       cycleTime: 10,
       operators: 1,
       setupTime: 0,
       uptimePercent: 100,
       batchSize: 10
     }]);
-    setNextId(nextId + 1);
   };
 
-  const removeStation = (id: number) => {
+  const removeStation = (id: string) => {
     setStations(stations.filter(s => s.id !== id));
   };
 
-  const updateStation = (id: number, field: keyof Station, value: string | number) => {
+  const updateStation = (id: string, field: keyof Station, value: string | number) => {
     setStations(stations.map(s => 
       s.id === id ? { ...s, [field]: value } : s
     ));
@@ -115,13 +138,7 @@ export default function VSMAnalyser() {
   };
 
   const reset = () => {
-    setStations([
-      { id: 1, name: 'Cutting', cycleTime: 10, operators: 1, setupTime: 0, uptimePercent: 100, batchSize: 10 },
-      { id: 2, name: 'Drilling', cycleTime: 15, operators: 1, setupTime: 0, uptimePercent: 100, batchSize: 10 },
-      { id: 3, name: 'Assembly', cycleTime: 8, operators: 1, setupTime: 0, uptimePercent: 100, batchSize: 10 },
-      { id: 4, name: 'Packaging', cycleTime: 12, operators: 1, setupTime: 0, uptimePercent: 100, batchSize: 10 }
-    ]);
-    setNextId(5);
+    setStations([]);
   };
 
   const exportVSM = () => {
@@ -283,7 +300,7 @@ END OF REPORT
         <div className="flex justify-between items-center mb-4">
           <div>
             <h1 className="text-2xl font-bold">Value Stream Mapper</h1>
-            <p className="text-muted-foreground text-sm">Theory of Constraints Analysis</p>
+            <p className="text-muted-foreground text-sm">Build your process flow from machines</p>
           </div>
           <div className="flex gap-2">
             <Button
@@ -300,50 +317,124 @@ END OF REPORT
               variant="outline"
               size="sm"
             >
-              Reset Default
+              Clear All
             </Button>
           </div>
         </div>
 
-        {/* Collapsible Configuration Panel */}
-        <div className="mb-4">
-          <Button
-            onClick={() => setShowConfig(!showConfig)}
-            variant="outline"
-            className="w-full justify-between"
-          >
-            <span className="font-bold">⚙️ Process Stations Configuration</span>
-            {showConfig ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-          </Button>
-          
-          {showConfig && (
-            <div className="border rounded-b-lg p-4 mt-0 border-t-0">
-              <div className="flex justify-end mb-3">
+        {/* Machine Selector */}
+        <Card className="mb-4">
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Factory className="h-5 w-5" />
+              Build Your Value Stream
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {isLoading ? (
+              <div className="space-y-2">
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+              </div>
+            ) : (
+              <>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Select machines from your shop floor to build the value stream, or add custom stations.
+                  Drag and reorder them to match your process flow.
+                </p>
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {machines.map((machine) => {
+                    const alreadyAdded = stations.some(s => s.machineId === machine.id);
+                    return (
+                      <Button
+                        key={machine.id}
+                        onClick={() => addMachineToVSM(machine)}
+                        disabled={alreadyAdded}
+                        variant={alreadyAdded ? "outline" : "default"}
+                        size="sm"
+                        className="gap-2"
+                      >
+                        <Factory className="h-4 w-4" />
+                        {machine.name}
+                        {alreadyAdded && <Badge variant="secondary" className="ml-1">Added</Badge>}
+                      </Button>
+                    );
+                  })}
+                  {machines.length === 0 && (
+                    <p className="text-sm text-muted-foreground">No machines found. Create machines first or add custom stations below.</p>
+                  )}
+                </div>
                 <Button
-                  onClick={addStation}
-                  variant="default"
+                  onClick={addCustomStation}
+                  variant="outline"
                   size="sm"
                 >
                   <Plus className="h-4 w-4 mr-2" />
-                  Add Station
+                  Add Custom Station
                 </Button>
+              </>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Process Flow Display */}
+        {stations.length > 0 && (
+          <Card className="mb-4">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-lg">Process Flow</CardTitle>
+              <Button
+                onClick={() => setShowConfig(!showConfig)}
+                variant="ghost"
+                size="sm"
+              >
+                {showConfig ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                {showConfig ? 'Hide' : 'Show'} Configuration
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {/* Simple Flow Visualization */}
+              <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-2">
+                {stations.map((station, index) => (
+                  <div key={station.id} className="flex items-center gap-2">
+                    <Badge variant="outline" className="whitespace-nowrap">
+                      {index + 1}. {station.name}
+                    </Badge>
+                    {index < stations.length - 1 && <ArrowRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />}
+                  </div>
+                ))}
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-                {stations.map((station) => (
+              {/* Simple Flow Visualization */}
+              <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-2">
+                {stations.map((station, index) => (
+                  <div key={station.id} className="flex items-center gap-2">
+                    <Badge variant="outline" className="whitespace-nowrap">
+                      {index + 1}. {station.name}
+                    </Badge>
+                    {index < stations.length - 1 && <ArrowRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />}
+                  </div>
+                ))}
+              </div>
+
+              {/* Station Configuration */}
+              {showConfig && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">{stations.map((station) => (
                   <div key={station.id} className="border rounded p-3 bg-card">
                     <div className="flex justify-between items-center mb-2">
-                      <Input
-                        type="text"
-                        value={station.name}
-                        onChange={(e) => updateStation(station.id, 'name', e.target.value)}
-                        className="font-bold text-sm flex-1 mr-2 h-8"
-                      />
+                      <div className="flex items-center gap-2 flex-1">
+                        {station.machineId && <Factory className="h-4 w-4 text-muted-foreground" />}
+                        <Input
+                          type="text"
+                          value={station.name}
+                          onChange={(e) => updateStation(station.id, 'name', e.target.value)}
+                          className="font-bold text-sm flex-1 h-8"
+                        />
+                      </div>
                       <Button
                         onClick={() => removeStation(station.id)}
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8 text-destructive"
+                        className="h-8 w-8 text-destructive ml-2"
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -409,13 +500,14 @@ END OF REPORT
                   </div>
                 ))}
               </div>
-            </div>
-          )}
-        </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Value Stream Map */}
         <div className="border rounded-lg p-6 bg-card">
-          <h2 className="text-xl font-bold mb-6">Value Stream Map</h2>
+          <h2 className="text-xl font-bold mb-6">Value Stream Analysis</h2>
           
           {metrics.length > 0 ? (
             <div className="space-y-6">
@@ -552,7 +644,7 @@ END OF REPORT
             </div>
           ) : (
             <div className="h-64 flex items-center justify-center text-muted-foreground">
-              Add process stations above to see the value stream map
+              {stations.length === 0 ? 'Add machines or stations above to begin your value stream analysis' : 'Configure station parameters to see analysis'}
             </div>
           )}
         </div>
