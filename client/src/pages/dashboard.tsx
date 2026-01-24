@@ -525,7 +525,7 @@ export default function Dashboard() {
     <div className="flex flex-col h-full">
       {/* Collapsible Top Pane */}
       <div className="border-b bg-card/50">
-        <div className="flex items-center justify-between px-6 py-2">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-6 py-2">
           <div className="flex items-center gap-2">
             <button
               className="rounded p-1 hover:bg-muted transition"
@@ -535,9 +535,9 @@ export default function Dashboard() {
             >
               {showTopPane ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
             </button>
-            <h1 className="text-2xl font-semibold" data-testid="text-dashboard-title">Cell Dashboard</h1>
+            <h1 className="text-xl sm:text-2xl font-semibold" data-testid="text-dashboard-title">Cell Dashboard</h1>
           </div>
-          <span className="text-sm text-muted-foreground">Real-time manufacturing cell status</span>
+          <span className="text-xs sm:text-sm text-muted-foreground">Real-time manufacturing cell status</span>
         </div>
         {showTopPane && (
           <>
@@ -567,10 +567,6 @@ export default function Dashboard() {
                     </SelectContent>
                   </Select>
                 </div>
-                <Button onClick={handleAddMachine} className="gap-2" data-testid="button-add-machine">
-                  <Plus className="h-4 w-4" />
-                  Add Machine
-                </Button>
                 <Button variant="ghost" size="sm" className="gap-1 ml-2" onClick={() => setShowScheduleSettings(v => !v)}>
                   <Settings2 className="h-4 w-4" />
                   <span>Schedule</span>
@@ -579,7 +575,7 @@ export default function Dashboard() {
               </div>
             </div>
             {/* Summary Stats */}
-            <div className="mt-3 grid grid-cols-4 gap-3 px-6">
+            <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 px-4 sm:px-6">
               <div className="flex items-center gap-2 rounded-md bg-background p-3">
                 <div className="flex h-8 w-8 items-center justify-center rounded-md bg-machine-running/10">
                   <Play className="h-4 w-4 text-machine-running" />
@@ -625,16 +621,18 @@ export default function Dashboard() {
               </div>
             </div>
             {/* EST Clock and Planned Runtime */}
-            <div className="flex items-center gap-8 p-4 border-b bg-muted/10">
-              <div className="flex items-center gap-4">
-                <span className="font-semibold text-lg">Current Time (EST):</span>
-                <span className="font-mono text-lg" data-testid="clock-est">
+            <div className="flex flex-wrap items-center gap-3 sm:gap-8 p-3 sm:p-4 border-b bg-muted/10">
+              <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+                <span className="font-semibold text-sm sm:text-lg">Time (EST):</span>
+                <span className="font-mono text-sm sm:text-lg" data-testid="clock-est">
                   {estTime.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true })}
                 </span>
-                <span className="font-semibold text-lg ml-6">Planned Runtime Elapsed:</span>
-                <span className="font-mono text-lg" data-testid="planned-runtime">{plannedRuntimeMinutes} min</span>
-                <Badge variant={isBreak ? "destructive" : "default"} className="ml-4">
-                  {isBreak ? "Breaktime" : "Runtime"}
+              </div>
+              <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+                <span className="font-semibold text-sm sm:text-lg">Runtime:</span>
+                <span className="font-mono text-sm sm:text-lg" data-testid="planned-runtime">{plannedRuntimeMinutes} min</span>
+                <Badge variant={isBreak ? "destructive" : "default"} className="text-xs">
+                  {isBreak ? "Break" : "Running"}
                 </Badge>
               </div>
             </div>
@@ -768,12 +766,6 @@ export default function Dashboard() {
                   : "Add your first machine to start tracking production status and metrics"
                 }
               </p>
-              {!searchQuery && (
-                <Button onClick={handleAddMachine} className="gap-2" data-testid="button-add-first-machine">
-                  <Plus className="h-4 w-4" />
-                  Add Your First Machine
-                </Button>
-              )}
             </div>
           ) : (
             <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">

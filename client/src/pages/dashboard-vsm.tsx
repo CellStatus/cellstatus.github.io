@@ -430,10 +430,6 @@ export default function Dashboard() {
                   className="pl-9 w-64"
                 />
               </div>
-              <Button onClick={() => setMachineDialogOpen(true)} className="gap-2">
-                <Plus className="h-4 w-4" />
-                Add Machine
-              </Button>
             </div>
           </div>
 
@@ -459,14 +455,8 @@ export default function Dashboard() {
               <p className="text-muted-foreground mb-4">
                 {searchQuery 
                   ? "Try a different search term" 
-                  : "Add machines to start building your value stream"}
+                  : "Add machines from the Machines page to get started"}
               </p>
-              {!searchQuery && (
-                <Button onClick={() => setMachineDialogOpen(true)} className="gap-2">
-                  <Plus className="h-4 w-4" />
-                  Add Your First Machine
-                </Button>
-              )}
             </div>
           ) : (
             <div className="space-y-3">
