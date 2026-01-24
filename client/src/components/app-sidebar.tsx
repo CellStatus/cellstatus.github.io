@@ -8,6 +8,7 @@ import {
   AlertTriangle,
   Trash2,
   TrendingUp,
+  GitBranch,
 } from "lucide-react";
 import {
   Sidebar,
@@ -62,6 +63,11 @@ const navItems = [
     title: "Reports",
     url: "/reports",
     icon: BarChart3,
+  },
+  {
+    title: "VSM Analyser",
+    url: "/vsm-analyser",
+    icon: GitBranch,
   },
 ];
 
