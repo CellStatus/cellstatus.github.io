@@ -6,37 +6,12 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { useAuth } from "@/hooks/useAuth";
 import Dashboard from "@/pages/dashboard-vsm";
 import Machines from "@/pages/machines";
 import VSMBuilder from "@/pages/vsm-analyser";
-import Landing from "@/pages/landing";
 import NotFound from "@/pages/not-found";
 
 function AppContent() {
-  const { isAuthenticated, isLoading } = useAuth();
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary" />
-      </div>
-    );
-  }
-
-  // Unauthenticated: show landing page
-  if (!isAuthenticated) {
-    return (
-      <div className="h-screen w-full">
-        <Switch>
-          <Route path="/" component={Landing} />
-          <Route component={NotFound} />
-        </Switch>
-      </div>
-    );
-  }
-
-  // Authenticated: show full app with sidebar
   const style = {
     "--sidebar-width": "16rem",
     "--sidebar-width-icon": "3rem",
