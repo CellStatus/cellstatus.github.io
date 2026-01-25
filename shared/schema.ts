@@ -21,6 +21,8 @@ export const machines = pgTable("machines", {
   uptimePercent: real("uptime_percent"), // reliability percentage (0-100)
   setupTime: real("setup_time"), // setup time in seconds
   statusUpdate: text("status_update"), // Machine status notes
+  // Operational counters (optional)
+  // (legacy OEE fields removed from DB migrations)
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
@@ -28,6 +30,22 @@ export const machines = pgTable("machines", {
 export const insertMachineSchema = createInsertSchema(machines).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertMachine = z.infer<typeof insertMachineSchema>;
 export type Machine = typeof machines.$inferSelect;
+
+// Placeholder / additional shared types for frontend usage
+export type Operator = { id: string; name: string; };
+export type ProductionStat = any;
+export type DowntimeLog = any;
+
+// Lightweight downtime helper lists (frontend may import these)
+export const downtimeCategories = ['mechanical', 'electrical', 'material', 'operator', 'quality', 'other'] as const;
+export const downtimeReasonCodes: Record<string, { category: typeof downtimeCategories[number]; label: string }> = {
+  MECH_01: { category: 'mechanical', label: 'Bearing failure' },
+  ELEC_01: { category: 'electrical', label: 'Power loss' },
+  MAT_01: { category: 'material', label: 'Missing raw material' },
+  OP_01: { category: 'operator', label: 'Operator absent' },
+  QUA_01: { category: 'quality', label: 'Quality hold' },
+  OTH_01: { category: 'other', label: 'Other' },
+};
 
 // === VALUE STREAM MAPPING ===
 

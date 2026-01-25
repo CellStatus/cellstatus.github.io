@@ -29,11 +29,37 @@ export interface IStorage {
 export class DatabaseStorage implements IStorage {
   // Machines
   async getMachines(): Promise<Machine[]> {
-    return await db.select().from(machines);
+    return await db.select({
+      id: machines.id,
+      name: machines.name,
+      machineId: machines.machineId,
+      status: machines.status,
+      cell: machines.cell,
+      idealCycleTime: machines.idealCycleTime,
+      batchSize: machines.batchSize,
+      uptimePercent: machines.uptimePercent,
+      setupTime: machines.setupTime,
+      statusUpdate: machines.statusUpdate,
+      createdAt: machines.createdAt,
+      updatedAt: machines.updatedAt,
+    }).from(machines);
   }
 
   async getMachine(id: string): Promise<Machine | undefined> {
-    const result = await db.select().from(machines).where(eq(machines.id, id)).limit(1);
+    const result = await db.select({
+      id: machines.id,
+      name: machines.name,
+      machineId: machines.machineId,
+      status: machines.status,
+      cell: machines.cell,
+      idealCycleTime: machines.idealCycleTime,
+      batchSize: machines.batchSize,
+      uptimePercent: machines.uptimePercent,
+      setupTime: machines.setupTime,
+      statusUpdate: machines.statusUpdate,
+      createdAt: machines.createdAt,
+      updatedAt: machines.updatedAt,
+    }).from(machines).where(eq(machines.id, id)).limit(1);
     return result[0];
   }
 

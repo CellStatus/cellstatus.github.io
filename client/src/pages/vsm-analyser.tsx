@@ -94,15 +94,10 @@ export default function VSMBuilder() {
   const [vsmStatus, setVsmStatus] = useState('');
   const [vsmNotes, setVsmNotes] = useState('');
 
-  // Simulation state
-  const [showSimulation, setShowSimulation] = useState(false);
-  const [simRunning, setSimRunning] = useState(false);
-  const [simTime, setSimTime] = useState(0); // in seconds
-  const [simSpeed, setSimSpeed] = useState(10); // simulation seconds per real second
-  const [simWipHistory, setSimWipHistory] = useState<{time: number, totalWip: number, exited: number}[]>([]);
-  const [simCurrentWip, setSimCurrentWip] = useState<{[key: number]: number}>({});
-  const [simTotalExited, setSimTotalExited] = useState(0); // Total units that have exited the system
-  const simIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  // (Simulation removed) Editable WIP UI state remains
+  // Editable WIP UI state (editing a buffer after an op)
+  const [editingWipStep, setEditingWipStep] = useState<number | null>(null);
+  const [editingWipValue, setEditingWipValue] = useState<string>('');
 
   // Parse VSM ID from URL query params
   const vsmIdFromUrl = new URLSearchParams(searchString).get('id');
@@ -237,118 +232,21 @@ export default function VSMBuilder() {
     ));
   };
 
-  // Simulation functions
-  const initSimulation = () => {
-    const { stepMetrics } = calculateMetrics();
-    if (stepMetrics.length === 0) return;
-    
-    // Initialize WIP to 0 at all buffers (continuous input will feed the system)
-    const initialWip: {[key: number]: number} = { 0: 0 };
-    stepMetrics.forEach(step => {
-      initialWip[step.stepNumber] = 0;
-    });
-    
-    setSimCurrentWip(initialWip);
-    setSimTotalExited(0);
-    setSimWipHistory([{ time: 0, totalWip: 0, exited: 0 }]);
-    setSimTime(0);
-  };
-
-  const runSimulationStep = () => {
-    const { stepMetrics } = calculateMetrics();
-    if (stepMetrics.length === 0) return;
-    
-    const sortedSteps = stepMetrics.sort((a, b) => a.stepNumber - b.stepNumber);
-    const deltaTime = 1; // 1 second simulation step
-    
-    // Calculate new time first
-    const newTime = simTime + 1;
-    
-    // Calculate new WIP state
-    const newWip = { ...simCurrentWip };
-    
-    // CONTINUOUS INPUT: First operation always has unlimited supply
-    // Feed material to the first operation at its maximum rate
-    const firstStep = sortedSteps[0];
-    if (firstStep) {
-      const inputRate = firstStep.combinedRate * deltaTime;
-      newWip[0] = (newWip[0] || 0) + inputRate; // Continuous incoming material
-    }
-    
-    // Process each step - pull from upstream buffer, push to downstream buffer
-    sortedSteps.forEach((step, idx) => {
-      const upstreamBuffer = idx === 0 ? 0 : sortedSteps[idx - 1].stepNumber;
-      const currentBuffer = step.stepNumber;
-      
-      // How many units can this step process per second?
-      const unitsPerSecond = step.combinedRate * deltaTime;
-      
-      // Pull from upstream (limited by available WIP and processing capacity)
-      const canProcess = Math.min(newWip[upstreamBuffer] || 0, unitsPerSecond);
-      
-      // Move units from upstream to current buffer (completed by this step)
-      if (canProcess > 0) {
-        newWip[upstreamBuffer] = Math.max(0, (newWip[upstreamBuffer] || 0) - canProcess);
-        newWip[currentBuffer] = (newWip[currentBuffer] || 0) + canProcess;
+  // Save or remove WIP quantity for a buffer after an op
+  const saveWipForStep = (afterOpNumber: number, quantity: number) => {
+    setWipInventory(prev => {
+      const q = Math.max(0, Math.floor(quantity));
+      const exists = prev.find(w => w.afterOpNumber === afterOpNumber);
+      if (q === 0) {
+        return prev.filter(w => w.afterOpNumber !== afterOpNumber);
       }
+      if (exists) {
+        return prev.map(w => w.afterOpNumber === afterOpNumber ? { ...w, quantity: q } : w);
+      }
+      return [...prev, { afterOpNumber, quantity: q }];
     });
-    
-    // Remove finished goods from the last buffer (they exit the system)
-    let exitedThisStep = 0;
-    const lastStep = sortedSteps[sortedSteps.length - 1];
-    if (lastStep) {
-      const exitRate = lastStep.combinedRate * deltaTime;
-      const available = newWip[lastStep.stepNumber] || 0;
-      exitedThisStep = Math.min(available, exitRate);
-      newWip[lastStep.stepNumber] = Math.max(0, available - exitedThisStep);
-    }
-    
-    // Calculate total WIP in system (excluding incoming buffer for cleaner display)
-    const totalWipInSystem = Object.entries(newWip)
-      .filter(([key]) => parseInt(key) > 0)
-      .reduce((sum, [, val]) => sum + val, 0);
-    
-    const newTotalExited = simTotalExited + exitedThisStep;
-    
-    // Update all state at once
-    setSimCurrentWip(newWip);
-    setSimTotalExited(newTotalExited);
-    setSimWipHistory(prev => {
-      const newHistory = [...prev, { time: newTime, totalWip: totalWipInSystem, exited: newTotalExited }];
-      // Only keep last 300 data points (5 minutes at 1/sec)
-      if (newHistory.length > 300) newHistory.shift();
-      return newHistory;
-    });
-    setSimTime(newTime);
   };
-
-  // Simulation interval
-  useEffect(() => {
-    if (simRunning) {
-      simIntervalRef.current = setInterval(() => {
-        runSimulationStep();
-      }, 1000 / simSpeed);
-    } else if (simIntervalRef.current) {
-      clearInterval(simIntervalRef.current);
-    }
-    return () => {
-      if (simIntervalRef.current) clearInterval(simIntervalRef.current);
-    };
-  }, [simRunning, simSpeed]);
-
-  const startSimulation = () => {
-    if (simTime === 0) initSimulation();
-    setSimRunning(true);
-  };
-
-  const pauseSimulation = () => {
-    setSimRunning(false);
-  };
-
-  const resetSimulation = () => {
-    setSimRunning(false);
-    initSimulation();
-  };
+  // Simulation removed: WIP is managed via `wipInventory` and editable triangles.
 
   // Calculate metrics with parallel machine aggregation at the process step level
   const calculateMetrics = () => {
@@ -662,19 +560,18 @@ WIP INVENTORY & LITTLE'S LAW ANALYSIS
 
 `;
 
-    // Current WIP Status from simulation
-    const totalWip = Object.entries(simCurrentWip)
-      .filter(([key]) => parseInt(key) > 0)
-      .reduce((sum, [, val]) => sum + val, 0);
+    // Current WIP Status from saved VSM (`wipInventory`)
+    const totalWip = (wipInventory || []).reduce((sum, w) => sum + (w.quantity || 0), 0);
     const sortedSteps = [...stepMetrics].sort((a, b) => a.stepNumber - b.stepNumber);
-    
-    content += `CURRENT WIP STATUS (from simulation):\n\n`;
-    
+
+    content += `CURRENT WIP STATUS (from VSM buffers):\n\n`;
+
     content += `  [IN] Continuous Supply (∞)\n`;
-    
-    // WIP between each operation
+
+    // WIP between each operation (from `wipInventory`)
     sortedSteps.forEach((step, idx) => {
-      const wipAfter = simCurrentWip[step.stepNumber] || 0;
+      const entry = (wipInventory || []).find(w => w.afterOpNumber === step.stepNumber);
+      const wipAfter = entry ? entry.quantity : 0;
       const marker = step.isBottleneck ? ' ⚠ BOTTLENECK' : '';
       content += `    ↓\n`;
       content += `  [Op ${step.stepNumber}] ${step.displayName}${marker}\n`;
@@ -685,10 +582,10 @@ WIP INVENTORY & LITTLE'S LAW ANALYSIS
       }
     });
     content += `    ↓\n`;
-    content += `  [OUT] Finished Goods Exit → ${simTotalExited.toFixed(0)} units produced\n\n`;
-    
+    content += `  [OUT] Finished Goods Exit (Estimated throughput) → ${(bottleneckRate * 3600).toFixed(0)} UPH\n\n`;
+
     content += `TOTAL WIP IN SYSTEM: ${totalWip.toFixed(0)} units\n`;
-    content += `TOTAL THROUGHPUT: ${simTotalExited.toFixed(0)} units in ${simTime} seconds\n\n`;
+    content += `TOTAL THROUGHPUT (est.): ${(bottleneckRate * 3600).toFixed(0)} UPH\n\n`;
     
     // Little's Law Analysis
     if (totalWip > 0 && bottleneckRate > 0) {
@@ -724,9 +621,12 @@ System receives new material at the rate of the first operation.
 
     // Run simulation for 300 seconds with continuous input
     const simSteps = sortedSteps;
+    // Initialize simulation buffers using saved VSM `wipInventory` so the
+    // simulation starts from the current inventory state instead of zeros.
     const simWip: {[key: number]: number} = { 0: 0 };
     simSteps.forEach(step => {
-      simWip[step.stepNumber] = 0;
+      const entry = (wipInventory || []).find(w => w.afterOpNumber === step.stepNumber);
+      simWip[step.stepNumber] = entry ? (entry.quantity || 0) : 0;
     });
     
     const snapshots: {time: number, wip: {[key: number]: number}, exited: number, totalWip: number}[] = [];
@@ -1324,201 +1224,7 @@ END OF REPORT
           <div className="flex items-center justify-between mb-4 sm:mb-6">
             <h2 className="text-lg sm:text-xl font-bold">Value Stream Analysis</h2>
             <div className="flex gap-2">
-              {/* Simulate Button */}
-              <Dialog open={showSimulation} onOpenChange={setShowSimulation}>
-                <DialogTrigger asChild>
-                  <Button variant="outline" size="sm" className="gap-1" onClick={() => { if (!showSimulation) initSimulation(); }}>
-                    <Activity className="h-4 w-4" />
-                    <span className="hidden sm:inline">Simulate</span>
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-4xl max-h-[85vh]">
-                  <DialogHeader>
-                    <DialogTitle>WIP Flow Simulation</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-4">
-                    {/* Controls */}
-                    <div className="flex items-center gap-4 pb-3 border-b">
-                      <div className="flex gap-2">
-                        {!simRunning ? (
-                          <Button size="sm" onClick={startSimulation} className="gap-1">
-                            <Play className="h-4 w-4" /> Play
-                          </Button>
-                        ) : (
-                          <Button size="sm" onClick={pauseSimulation} variant="secondary" className="gap-1">
-                            <Pause className="h-4 w-4" /> Pause
-                          </Button>
-                        )}
-                        <Button size="sm" variant="outline" onClick={resetSimulation} className="gap-1">
-                          <RotateCcw className="h-4 w-4" /> Reset
-                        </Button>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Label className="text-xs">Speed:</Label>
-                        <select 
-                          value={simSpeed} 
-                          onChange={(e) => setSimSpeed(Number(e.target.value))}
-                          className="h-8 px-2 border rounded text-sm"
-                        >
-                          <option value={1}>1x (Real-time)</option>
-                          <option value={5}>5x</option>
-                          <option value={10}>10x</option>
-                          <option value={30}>30x</option>
-                          <option value={60}>60x (1 min/sec)</option>
-                        </select>
-                      </div>
-                      <div className="text-sm text-muted-foreground">
-                        Time: <span className="font-mono font-bold">{Math.floor(simTime / 60)}:{(simTime % 60).toString().padStart(2, '0')}</span>
-                      </div>
-                    </div>
-
-                    {/* Current WIP Display */}
-                    <div className="space-y-2">
-                      <h4 className="font-semibold text-sm">Current WIP at Each Buffer</h4>
-                      <div className="flex flex-wrap gap-3">
-                        {(() => {
-                          const { stepMetrics } = calculateMetrics();
-                          const sortedSteps = stepMetrics.sort((a, b) => a.stepNumber - b.stepNumber);
-                          return (
-                            <>
-                              {/* Incoming buffer */}
-                              <div className="flex flex-col items-center p-2 border rounded bg-yellow-50 dark:bg-yellow-950/20 min-w-[80px]">
-                                <div className="text-[10px] text-muted-foreground">IN</div>
-                                <div className="w-0 h-0 border-l-[10px] border-r-[10px] border-t-[14px] border-l-transparent border-r-transparent border-t-yellow-500 my-1" />
-                                <div className="text-lg font-bold text-yellow-600">{(simCurrentWip[0] || 0).toFixed(0)}</div>
-                              </div>
-                              
-                              {sortedSteps.map((step, idx) => (
-                                <div key={step.stepNumber} className="flex items-center gap-2">
-                                  {/* Op box */}
-                                  <div className={`flex flex-col items-center p-2 border rounded min-w-[80px] ${step.isBottleneck ? 'bg-red-50 dark:bg-red-950/20 border-red-300' : 'bg-muted'}`}>
-                                    <div className="text-[10px] text-muted-foreground">{step.opName ? `Op ${step.stepNumber} - ${step.opName}` : `Op ${step.stepNumber}`}</div>
-                                    <div className="text-xs font-medium truncate max-w-[70px]">{step.displayName.split(',')[0]}</div>
-                                    <div className="text-[10px] text-muted-foreground">{(step.combinedRate * 3600).toFixed(0)} UPH</div>
-                                    {step.isBottleneck && <Badge variant="destructive" className="text-[8px] px-1 mt-1">Bottleneck</Badge>}
-                                  </div>
-                                  
-                                  {/* Arrow */}
-                                  <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                                  
-                                  {/* Buffer after op */}
-                                  <div className="flex flex-col items-center p-2 border rounded bg-yellow-50 dark:bg-yellow-950/20 min-w-[80px]">
-                                    <div className="text-[10px] text-muted-foreground">Buffer</div>
-                                    <div className="w-0 h-0 border-l-[10px] border-r-[10px] border-t-[14px] border-l-transparent border-r-transparent border-t-yellow-500 my-1" />
-                                    <div className={`text-lg font-bold ${(simCurrentWip[step.stepNumber] || 0) > 50 ? 'text-red-600' : 'text-yellow-600'}`}>
-                                      {(simCurrentWip[step.stepNumber] || 0).toFixed(0)}
-                                    </div>
-                                  </div>
-                                  
-                                  {idx < sortedSteps.length - 1 && <ArrowRight className="h-4 w-4 text-muted-foreground" />}
-                                </div>
-                              ))}
-                              
-                              {/* Exit with throughput counter */}
-                              <div className="flex flex-col items-center justify-center p-2 border rounded bg-green-50 dark:bg-green-950/20 min-w-[80px]">
-                                <div className="text-[10px] text-muted-foreground">OUT</div>
-                                <ArrowRight className="h-5 w-5 text-green-600 mb-1" />
-                                <div className="text-lg font-bold text-green-600">{simTime > 0 ? ((simTotalExited / simTime) * 3600).toFixed(0) : 0}</div>
-                                <div className="text-[8px] text-muted-foreground">UPH</div>
-                                <div className="text-[10px] text-muted-foreground mt-1">{simTotalExited.toFixed(0)} total</div>
-                              </div>
-                            </>
-                          );
-                        })()}
-                      </div>
-                    </div>
-
-                    {/* Total WIP & Throughput Chart */}
-                    <div className="space-y-2">
-                      <h4 className="font-semibold text-sm">Total WIP & Throughput Over Time</h4>
-                      <div className="border rounded p-3 bg-muted/30 h-[200px] relative overflow-hidden">
-                        {simWipHistory.length > 1 ? (
-                          <div className="h-full">
-                            {(() => {
-                              // Show last 100 time points
-                              const displayHistory = simWipHistory.slice(-100);
-                              const maxWip = Math.max(...displayHistory.map(h => h.totalWip), 10);
-                              const maxExited = Math.max(...displayHistory.map(h => h.exited), 10);
-                              
-                              return (
-                                <>
-                                  {/* Y-axis labels */}
-                                  <div className="absolute left-0 top-0 h-[85%] w-10 flex flex-col justify-between text-[8px] text-muted-foreground">
-                                    <span className="text-yellow-600">{maxWip.toFixed(0)}</span>
-                                    <span className="text-yellow-600">{(maxWip / 2).toFixed(0)}</span>
-                                    <span>0</span>
-                                  </div>
-                                  
-                                  {/* Right Y-axis for throughput */}
-                                  <div className="absolute right-0 top-0 h-[85%] w-10 flex flex-col justify-between text-[8px] text-muted-foreground text-right">
-                                    <span className="text-green-600">{maxExited.toFixed(0)}</span>
-                                    <span className="text-green-600">{(maxExited / 2).toFixed(0)}</span>
-                                    <span>0</span>
-                                  </div>
-                                  
-                                  {/* Chart area - SVG line chart */}
-                                  <svg className="absolute left-10 right-10 top-0 h-[85%]" preserveAspectRatio="none">
-                                    {/* WIP Line (yellow) */}
-                                    <polyline
-                                      fill="none"
-                                      stroke="#eab308"
-                                      strokeWidth="2"
-                                      points={displayHistory.map((point, idx) => {
-                                        const x = (idx / (displayHistory.length - 1)) * 100;
-                                        const y = 100 - (point.totalWip / maxWip) * 100;
-                                        return `${x}%,${y}%`;
-                                      }).join(' ')}
-                                    />
-                                    {/* Throughput Line (green) */}
-                                    <polyline
-                                      fill="none"
-                                      stroke="#22c55e"
-                                      strokeWidth="2"
-                                      points={displayHistory.map((point, idx) => {
-                                        const x = (idx / (displayHistory.length - 1)) * 100;
-                                        const y = 100 - (point.exited / maxExited) * 100;
-                                        return `${x}%,${y}%`;
-                                      }).join(' ')}
-                                    />
-                                  </svg>
-                                  
-                                  {/* X-axis time labels */}
-                                  <div className="absolute bottom-0 left-10 right-10 flex justify-between text-[8px] text-muted-foreground">
-                                    <span>{displayHistory[0]?.time || 0}s</span>
-                                    <span>{displayHistory[Math.floor(displayHistory.length / 2)]?.time || 0}s</span>
-                                    <span>{displayHistory[displayHistory.length - 1]?.time || 0}s</span>
-                                  </div>
-                                  
-                                  {/* Legend */}
-                                  <div className="absolute bottom-4 right-12 flex gap-3 text-[10px] bg-background/80 px-2 py-1 rounded">
-                                    <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-yellow-500 inline-block"></span> Total WIP</span>
-                                    <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-green-500 inline-block"></span> Throughput</span>
-                                  </div>
-                                </>
-                              );
-                            })()}
-                          </div>
-                        ) : (
-                          <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-                            Press Play to start simulation
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Insights */}
-                    <div className="text-xs text-muted-foreground space-y-1 border-t pt-3">
-                      <p><strong>What to observe:</strong></p>
-                      <ul className="list-disc pl-4 space-y-1">
-                        <li>WIP builds up <strong>before</strong> the bottleneck (constraint starves downstream)</li>
-                        <li>Buffers after bottleneck stay low (fast ops drain them quickly)</li>
-                        <li>Red highlight = WIP exceeding 50 units (potential problem)</li>
-                        <li>System reaches steady-state after initial transient period</li>
-                      </ul>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
+              {/* Simulation UI removed */}
               
               <Dialog>
                 <DialogTrigger asChild>
@@ -1798,17 +1504,42 @@ END OF REPORT
                         
                         {stepIndex < stepMetrics.length - 1 && (
                           <div className="flex flex-col items-center gap-1 flex-shrink-0" style={{ marginTop: '20px' }}>
-                            {/* WIP Triangle - Display simulation WIP */}
+                            {/* WIP Triangle - Editable buffer (click to edit) */}
                             {(() => {
-                              const wipQty = simCurrentWip[step.stepNumber] || 0;
-                              const hasWip = wipQty > 0;
+                              const bufferEntry = (wipInventory || []).find(w => w.afterOpNumber === step.stepNumber);
+                              const displayQty = bufferEntry ? bufferEntry.quantity : 0;
+                              const hasWip = displayQty > 0;
+
                               return (
                                 <div className="flex flex-col items-center" title={`WIP after Op ${step.stepNumber}`}>
-                                  {/* Triangle pointing down */}
-                                  <div className={`w-0 h-0 border-l-[12px] border-r-[12px] border-t-[16px] border-l-transparent border-r-transparent ${hasWip ? 'border-t-yellow-500' : 'border-t-gray-300'}`} />
-                                  <span className={`text-[10px] font-bold mt-0.5 ${hasWip ? 'text-yellow-600 dark:text-yellow-400' : 'text-muted-foreground'}`}>
-                                    {wipQty.toFixed(0)}
-                                  </span>
+                                  {/* Triangle pointing down - larger for easier tapping */}
+                                  <div
+                                    onClick={() => {
+                                      setEditingWipStep(step.stepNumber);
+                                      setEditingWipValue(displayQty ? String(Math.round(displayQty)) : '');
+                                    }}
+                                    className={`w-0 h-0 border-l-[16px] border-r-[16px] border-t-[20px] border-l-transparent border-r-transparent ${hasWip ? 'border-t-yellow-500' : 'border-t-gray-300'}`}
+                                  />
+
+                                  {editingWipStep === step.stepNumber ? (
+                                    <input
+                                      autoFocus
+                                      value={editingWipValue}
+                                      onChange={(e) => setEditingWipValue(e.target.value.replace(/[^0-9]/g, ''))}
+                                      onBlur={() => {
+                                        const val = editingWipValue === '' ? 0 : parseInt(editingWipValue || '0', 10);
+                                        saveWipForStep(step.stepNumber, Number.isNaN(val) ? 0 : val);
+                                        setEditingWipStep(null);
+                                        setEditingWipValue('');
+                                      }}
+                                      onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                                      className="mt-0.5 w-14 text-center text-[12px] font-bold bg-transparent border rounded"
+                                    />
+                                  ) : (
+                                    <span className={`text-[12px] font-bold mt-0.5 ${hasWip ? 'text-yellow-600 dark:text-yellow-400' : 'text-muted-foreground'}`}>
+                                      {displayQty.toFixed(0)}
+                                    </span>
+                                  )}
                                 </div>
                               );
                             })()}
@@ -1827,9 +1558,8 @@ END OF REPORT
                     <div className="flex flex-col items-center">
                       <div className="text-[8px] text-muted-foreground mb-1">OUT</div>
                       <div className="text-lg sm:text-2xl text-green-600 font-bold">→</div>
-                      <div className="text-lg font-bold text-green-600">{simTime > 0 ? ((simTotalExited / simTime) * 3600).toFixed(0) : 0}</div>
+                      <div className="text-lg font-bold text-green-600">{(bottleneckRate * 3600).toFixed(0)}</div>
                       <span className="text-[9px] text-muted-foreground">UPH</span>
-                      <span className="text-[8px] text-muted-foreground">{simTotalExited.toFixed(0)} total</span>
                     </div>
                   </div>
                 </div>
@@ -1859,16 +1589,12 @@ END OF REPORT
                   <div className="text-xs sm:text-sm text-muted-foreground mb-1">Total WIP</div>
                   <div className="text-lg sm:text-2xl font-bold text-yellow-600">
                     {(() => {
-                      const totalWip = Object.entries(simCurrentWip)
-                        .filter(([key]) => parseInt(key) > 0)
-                        .reduce((sum, [, val]) => sum + val, 0);
+                      const totalWip = (wipInventory || []).reduce((sum, w) => sum + (w.quantity || 0), 0);
                       return totalWip.toFixed(0);
                     })()} <span className="text-xs sm:text-sm">units</span>
                   </div>
                   {(() => {
-                    const totalWip = Object.entries(simCurrentWip)
-                      .filter(([key]) => parseInt(key) > 0)
-                      .reduce((sum, [, val]) => sum + val, 0);
+                    const totalWip = (wipInventory || []).reduce((sum, w) => sum + (w.quantity || 0), 0);
                     const throughputPerHour = bottleneckRate * 3600;
                     const wipLeadTimeHours = throughputPerHour > 0 ? totalWip / throughputPerHour : 0;
                     return (
@@ -1878,7 +1604,7 @@ END OF REPORT
                             ≈ {wipLeadTimeHours < 1 ? `${(wipLeadTimeHours * 60).toFixed(0)} min` : `${wipLeadTimeHours.toFixed(1)} hr`} wait time
                           </span>
                         ) : (
-                          'Run simulation to see WIP'
+                          'No WIP buffers configured'
                         )}
                       </div>
                     );
@@ -1909,9 +1635,7 @@ END OF REPORT
                     <div>• To increase throughput: Add more parallel machines to Op {stepMetrics[bottleneckStepIndex]?.stepNumber} or reduce individual cycle times</div>
                   )}
                   {(() => {
-                    const totalWip = Object.entries(simCurrentWip)
-                      .filter(([key]) => parseInt(key) > 0)
-                      .reduce((sum, [, val]) => sum + val, 0);
+                    const totalWip = (wipInventory || []).reduce((sum, w) => sum + (w.quantity || 0), 0);
                     const throughputPerHour = bottleneckRate * 3600;
                     if (totalWip > 0 && throughputPerHour > 0) {
                       const wipLeadTimeHours = totalWip / throughputPerHour;

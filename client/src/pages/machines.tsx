@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import { Input } from '@/components/ui/input';
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -54,6 +55,13 @@ export default function MachinesPage() {
 
   const { data: machines = [], isLoading } = useQuery<Machine[]>({
     queryKey: ["/api/machines"],
+  });
+  const [machineSearch, setMachineSearch] = useState('');
+
+  const filteredMachines = machines.filter(m => {
+    const q = machineSearch.trim().toLowerCase();
+    if (!q) return true;
+    return (m.name || '').toLowerCase().includes(q) || (m.machineId || '').toLowerCase().includes(q);
   });
 
   const createMutation = useMutation({
@@ -141,8 +149,11 @@ export default function MachinesPage() {
 
       <div className="flex-1 overflow-auto p-6">
         <Card>
-          <CardHeader>
+          <CardHeader className="flex items-center justify-between">
             <CardTitle className="text-lg">All Machines</CardTitle>
+            <div className="flex items-center gap-2">
+              <Input placeholder="Search by name or ID" value={machineSearch} onChange={(e) => setMachineSearch(e.target.value)} className="w-64" />
+            </div>
           </CardHeader>
           <CardContent>
             {isLoading ? (
@@ -161,6 +172,12 @@ export default function MachinesPage() {
                   Add Machine
                 </Button>
               </div>
+            ) : filteredMachines.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <h3 className="font-medium mb-1">No results</h3>
+                <p className="text-sm text-muted-foreground mb-4">No machines match "{machineSearch}"</p>
+                <Button variant="outline" onClick={() => setMachineSearch('')}>Clear Search</Button>
+              </div>
             ) : (
               <Table>
                 <TableHeader>
@@ -178,7 +195,7 @@ export default function MachinesPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {machines.map((machine) => {
+                  {filteredMachines.map((machine) => {
                     const status = statusConfig[machine.status];
                     const StatusIcon = status.icon;
                     

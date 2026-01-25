@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -390,7 +390,7 @@ export default function Dashboard() {
                         {vsm.bottleneckRate && (
                           <div className="p-2 bg-muted/50 rounded">
                             <div className="text-xs text-muted-foreground">Throughput</div>
-                            <div className="font-bold">{vsm.bottleneckRate.toFixed(3)}/s</div>
+                            <div className="font-bold">{(vsm.bottleneckRate * 3600).toFixed(0)} UPH</div>
                           </div>
                         )}
                         {vsm.processEfficiency && (
