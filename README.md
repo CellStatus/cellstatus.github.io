@@ -6,12 +6,12 @@ A manufacturing Value Stream Mapping (VSM) and machine status tracking applicati
 
 ## ‚ú® Key Features
 
-### ÌæØ Dashboard
+###  Dashboard
 - **Live Status Cards**: View all machines with color-coded status (Running, Idle, Down, Maintenance, Setup)
 - **Quick Status Changes**: Update machine status with one click
 - **Notes & Tracking**: Add notes to machines for shift handoffs
 
-### Ìø≠ Machine Management
+###  Machine Management
 - **Machine Registry**: Maintain your equipment database with:
   - Machine ID and name
   - Cycle time and batch size
@@ -19,7 +19,7 @@ A manufacturing Value Stream Mapping (VSM) and machine status tracking applicati
   - Current status
 - **CRUD Operations**: Add, edit, and delete machines
 
-### Ì≥ä VSM Builder (Value Stream Mapping)
+###  VSM Builder (Value Stream Mapping)
 The core feature of the application - build and analyze your value stream:
 
 - **Process Flow Modeling**:
@@ -50,7 +50,7 @@ The core feature of the application - build and analyze your value stream:
   - Process flow overview with step metrics
   - Improvement recommendations based on constraints
 
-### Ìæ® Modern UI/UX
+###  Modern UI/UX
 - **Responsive Design**: Works on desktop, tablet, and mobile
 - **Dark Mode**: Toggle between light and dark themes
 - **Interactive Process Flow**: Click operations to configure parameters
@@ -58,7 +58,7 @@ The core feature of the application - build and analyze your value stream:
 
 ---
 
-## Ì∫Ä Getting Started
+##  Getting Started
 
 ### Prerequisites
 - **Node.js** 20 or higher
@@ -98,7 +98,7 @@ The core feature of the application - build and analyze your value stream:
 
 ---
 
-## Ì≥Å Project Structure
+##  Project Structure
 
 ```
 CellStatus/
@@ -122,7 +122,7 @@ CellStatus/
 
 ---
 
-## Ìª†Ô∏è Tech Stack
+## Ô∏è Tech Stack
 
 **Frontend**
 - React 18 + TypeScript
@@ -140,7 +140,7 @@ CellStatus/
 
 ---
 
-## Ì≥ê VSM Concepts
+##  VSM Concepts
 
 ### Theory of Constraints
 The VSM Builder applies TOC principles:
@@ -162,17 +162,17 @@ When multiple machines are assigned to the same operation number, their rates AD
 
 ---
 
-## Ì≥Ñ License
+##  License
 
 MIT License - see [LICENSE](./LICENSE) file for details
 
 ---
 
-## Ì≥ß Support
+##  Support
 
 For issues, feature requests, or questions:
 - Open an issue on [GitHub Issues](https://github.com/rwaynewhite15/CellStatus/issues)
 
 ---
 
-**Built for manufacturing teams to analyze and optimize production flow** Ìø≠
+**Built for manufacturing teams to analyze and optimize production flow** 
