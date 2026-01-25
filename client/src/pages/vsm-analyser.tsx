@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useLocation, useSearch } from 'wouter';
-import { Plus, Trash2, ChevronDown, ChevronUp, AlertTriangle, Download, Factory, ArrowRight, Save, PanelTopClose, PanelTop } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, ChevronUp, AlertTriangle, Download, Factory, ArrowRight, Save, PanelTopClose, PanelTop, HelpCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -9,6 +9,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { apiRequest, queryClient } from '@/lib/queryClient';
 import { useToast } from '@/hooks/use-toast';
 import type { Machine, VsmConfiguration } from '@shared/schema';
@@ -16,6 +18,7 @@ import type { Machine, VsmConfiguration } from '@shared/schema';
 interface Station {
   id: string;
   machineId?: string; // Link to actual machine (single machine only - atomic)
+  machineIdDisplay?: string; // The machine_id field for display (last 3 chars)
   name: string;
   cycleTime: number;
   operators: number;
@@ -53,6 +56,19 @@ interface StationMetrics extends Station {
   waitTime: number;
   setupImpact: number;
   downtimeImpact: number;
+}
+
+// Step-level metrics for parallel machine aggregation
+interface ProcessStepMetrics {
+  stepNumber: number;
+  stations: StationMetrics[];
+  combinedRate: number;           // Sum of all parallel machine rates
+  effectiveCycleTime: number;     // CT / number of machines (parallel effect)
+  isBottleneck: boolean;
+  utilization: number;
+  waitTime: number;
+  displayName: string;            // Combined name for display
+  totalOperators: number;
 }
 
 export default function VSMBuilder() {
@@ -125,9 +141,9 @@ export default function VSMBuilder() {
       return;
     }
 
-    const { metrics, bottleneckRate } = calculateMetrics();
-    const processEfficiency = metrics.length > 0 
-      ? (bottleneckRate / Math.max(...metrics.map(m => m.rate))) * 100 
+    const { stepMetrics, bottleneckRate } = calculateMetrics();
+    const processEfficiency = stepMetrics.length > 0 
+      ? (bottleneckRate / Math.max(...stepMetrics.map(s => s.combinedRate))) * 100 
       : 0;
 
     saveVsmMutation.mutate({
@@ -159,6 +175,7 @@ export default function VSMBuilder() {
     setStations([...stations, {
       id: crypto.randomUUID(),
       machineId: machine.id,
+      machineIdDisplay: machine.machineId,
       name: machine.name,
       cycleTime,
       operators: 1,
@@ -193,8 +210,10 @@ export default function VSMBuilder() {
     ));
   };
 
+  // Calculate metrics with parallel machine aggregation at the process step level
   const calculateMetrics = () => {
-    const metrics: StationMetrics[] = stations.map((s) => {
+    // First, calculate individual station metrics
+    const stationMetrics: StationMetrics[] = stations.map((s) => {
       // Setup time is amortized across the batch
       const setupImpact = s.setupTime / s.batchSize;
       const effectiveCycleTime = s.cycleTime + setupImpact;
@@ -203,9 +222,11 @@ export default function VSMBuilder() {
       const uptimeMultiplier = s.uptimePercent / 100;
       
       // Rate calculation with both setup and uptime factors
+      // Rate = operators / effective_cycle_time * uptime
       const theoreticalRate = s.operators / effectiveCycleTime;
       const actualRate = theoreticalRate * uptimeMultiplier;
       
+      // Takt time = time between units leaving this station
       const taktTime = effectiveCycleTime / s.operators / uptimeMultiplier;
       
       return {
@@ -222,30 +243,105 @@ export default function VSMBuilder() {
       };
     });
 
-    if (metrics.length === 0) return { metrics: [], bottleneckRate: 0, bottleneckIndex: -1 };
+    if (stationMetrics.length === 0) {
+      return { 
+        metrics: [] as StationMetrics[], 
+        stepMetrics: [] as ProcessStepMetrics[],
+        bottleneckRate: 0, 
+        bottleneckIndex: -1,
+        bottleneckStepIndex: -1
+      };
+    }
 
-    // Find bottleneck (slowest actual rate)
-    const bottleneckIndex = metrics.reduce((minIdx, curr, idx, arr) => 
-      curr.rate < arr[minIdx].rate ? idx : minIdx
-    , 0);
+    // Group stations by process step for parallel machine analysis
+    const stepGroups = groupStationsByStep(stations);
+    const sortedSteps = Array.from(stepGroups.keys()).sort((a, b) => a - b);
     
-    metrics[bottleneckIndex].isBottleneck = true;
-    const bottleneckRate = metrics[bottleneckIndex].rate;
-
-    // Calculate utilization and wait times
-    metrics.forEach((m, index) => {
-      m.utilization = (bottleneckRate / m.rate) * 100;
+    // Calculate step-level metrics (aggregating parallel machines)
+    const stepMetrics: ProcessStepMetrics[] = sortedSteps.map((stepNum, stepIndex) => {
+      const stationsInStep = stepGroups.get(stepNum)!;
+      const stationMetricsInStep = stationMetrics.filter(m => 
+        stationsInStep.some(s => s.id === m.id)
+      );
       
-      if (index > 0) {
-        const prevRate = metrics[index - 1].rate;
-        const currentRate = m.rate;
-        if (currentRate > prevRate) {
-          m.waitTime = (1 / prevRate) - (1 / currentRate);
-        }
-      }
+      // PARALLEL MACHINES: Rates ADD together
+      // If 2 machines each produce 1/min, together they produce 2/min
+      const combinedRate = stationMetricsInStep.reduce((sum, m) => sum + m.rate, 0);
+      
+      // Effective cycle time for the step = 1 / combined rate
+      // This represents the time between units leaving this step
+      const effectiveCycleTime = combinedRate > 0 ? 1 / combinedRate : Infinity;
+      
+      // Total operators at this step
+      const totalOperators = stationMetricsInStep.reduce((sum, m) => sum + m.operators, 0);
+      
+      // Build display name
+      const displayName = stationMetricsInStep.length > 1 
+        ? `[${stationMetricsInStep.map(m => m.name).join(' | ')}]`
+        : stationMetricsInStep[0]?.name || 'Unknown';
+      
+      return {
+        stepNumber: stepIndex + 1,
+        stations: stationMetricsInStep,
+        combinedRate,
+        effectiveCycleTime,
+        isBottleneck: false,
+        utilization: 0,
+        waitTime: 0,
+        displayName,
+        totalOperators
+      };
     });
 
-    return { metrics, bottleneckRate, bottleneckIndex };
+    // Find bottleneck step (lowest combined rate)
+    const bottleneckStepIndex = stepMetrics.reduce((minIdx, curr, idx, arr) => 
+      curr.combinedRate < arr[minIdx].combinedRate ? idx : minIdx
+    , 0);
+    
+    stepMetrics[bottleneckStepIndex].isBottleneck = true;
+    const bottleneckRate = stepMetrics[bottleneckStepIndex].combinedRate;
+
+    // Mark individual stations at bottleneck step
+    stepMetrics[bottleneckStepIndex].stations.forEach(s => {
+      const stationMetric = stationMetrics.find(m => m.id === s.id);
+      if (stationMetric) stationMetric.isBottleneck = true;
+    });
+
+    // Calculate step-level utilization and wait times
+    stepMetrics.forEach((step, index) => {
+      // Utilization = bottleneck rate / step rate * 100
+      step.utilization = (bottleneckRate / step.combinedRate) * 100;
+      
+      // Wait time = difference in cycle times between steps
+      if (index > 0) {
+        const prevStepRate = stepMetrics[index - 1].combinedRate;
+        const currentStepRate = step.combinedRate;
+        // If this step is faster than previous, it waits
+        if (currentStepRate > prevStepRate) {
+          step.waitTime = (1 / prevStepRate) - (1 / currentStepRate);
+        }
+      }
+      
+      // Propagate to individual stations
+      step.stations.forEach(s => {
+        const stationMetric = stationMetrics.find(m => m.id === s.id);
+        if (stationMetric) {
+          stationMetric.utilization = step.utilization;
+          stationMetric.waitTime = step.waitTime;
+        }
+      });
+    });
+
+    // For backwards compatibility, also find bottleneck in flat metrics
+    const bottleneckIndex = stationMetrics.findIndex(m => m.isBottleneck);
+
+    return { 
+      metrics: stationMetrics, 
+      stepMetrics,
+      bottleneckRate, 
+      bottleneckIndex,
+      bottleneckStepIndex
+    };
   };
 
   const reset = () => {
@@ -260,7 +356,7 @@ export default function VSMBuilder() {
   };
 
   const exportVSM = () => {
-    const { metrics, bottleneckRate, bottleneckIndex } = calculateMetrics();
+    const { metrics, stepMetrics, bottleneckRate, bottleneckIndex, bottleneckStepIndex } = calculateMetrics();
     
     if (metrics.length === 0) {
       alert('No stations to export');
@@ -269,32 +365,47 @@ export default function VSMBuilder() {
 
     const date = new Date().toLocaleDateString();
     const time = new Date().toLocaleTimeString();
+    const bottleneckStep = stepMetrics[bottleneckStepIndex];
     
     let content = `VALUE STREAM MAP ANALYSIS REPORT
 Generated: ${date} at ${time}
 
 ================================================================================
-PROCESS FLOW OVERVIEW
+PROCESS FLOW OVERVIEW (Step-Based Analysis)
 ================================================================================
 
 `;
 
-    // Process stations
-    metrics.forEach((m, index) => {
-      const bottleneckMarker = m.isBottleneck ? ' ⚠ BOTTLENECK' : '';
-      content += `${index + 1}. ${m.name.toUpperCase()}${bottleneckMarker}\n`;
-      content += `   ├─ Cycle Time: ${m.cycleTime} seconds\n`;
-      content += `   ├─ Operators: ${m.operators}\n`;
-      content += `   ├─ Takt Time: ${m.taktTime.toFixed(2)} seconds\n`;
-      content += `   ├─ Throughput Rate: ${m.rate.toFixed(3)} units/sec\n`;
-      content += `   ├─ Utilization: ${m.utilization.toFixed(1)}%\n`;
-      if (m.waitTime > 0) {
-        content += `   └─ Wait Time: ${m.waitTime.toFixed(2)} seconds\n`;
+    // Process steps (grouped by parallel machines)
+    stepMetrics.forEach((step, index) => {
+      const isParallel = step.stations.length > 1;
+      const bottleneckMarker = step.isBottleneck ? ' ⚠ BOTTLENECK' : '';
+      const parallelMarker = isParallel ? ` [${step.stations.length} PARALLEL MACHINES]` : '';
+      
+      content += `STEP ${step.stepNumber}. ${step.displayName.toUpperCase()}${bottleneckMarker}${parallelMarker}\n`;
+      
+      if (isParallel) {
+        content += `   ├─ Machines: ${step.stations.map(s => s.name).join(', ')}\n`;
+        content += `   ├─ Combined Rate: ${step.combinedRate.toFixed(3)} units/sec (rates ADD for parallel machines)\n`;
+        content += `   ├─ Per-Machine Rate: ${(step.combinedRate / step.stations.length).toFixed(3)} units/sec\n`;
+        content += `   ├─ Effective Step Cycle Time: ${step.effectiveCycleTime.toFixed(2)} seconds\n`;
+        content += `   ├─ Total Operators: ${step.totalOperators}\n`;
+      } else {
+        const m = step.stations[0];
+        content += `   ├─ Cycle Time: ${m.cycleTime} seconds\n`;
+        content += `   ├─ Operators: ${m.operators}\n`;
+        content += `   ├─ Effective Cycle Time: ${m.effectiveCycleTime.toFixed(2)} seconds\n`;
+        content += `   ├─ Rate: ${step.combinedRate.toFixed(3)} units/sec\n`;
+      }
+      
+      content += `   ├─ Utilization: ${step.utilization.toFixed(1)}%\n`;
+      if (step.waitTime > 0) {
+        content += `   └─ Wait Time: ${step.waitTime.toFixed(2)} seconds\n`;
       } else {
         content += `   └─ Wait Time: 0 seconds\n`;
       }
       
-      if (index < metrics.length - 1) {
+      if (index < stepMetrics.length - 1) {
         content += `   ↓\n`;
       }
       content += `\n`;
@@ -308,55 +419,72 @@ System Throughput:     ${bottleneckRate.toFixed(3)} units/sec
                        ${(bottleneckRate * 3600).toFixed(0)} units/hour
                        ${(bottleneckRate * 3600 * 8).toFixed(0)} units/8-hour shift
 
-Total Lead Time:       ${metrics.reduce((sum, m) => sum + m.taktTime, 0).toFixed(1)} seconds
+Total Lead Time:       ${stepMetrics.reduce((sum, s) => sum + s.effectiveCycleTime, 0).toFixed(1)} seconds
 
-Process Efficiency:    ${((bottleneckRate / Math.max(...metrics.map(m => m.rate))) * 100).toFixed(1)}%
+Process Efficiency:    ${((bottleneckRate / Math.max(...stepMetrics.map(s => s.combinedRate))) * 100).toFixed(1)}%
 
-Bottleneck Station:    ${metrics[bottleneckIndex].name}
+Bottleneck Step:       Step ${bottleneckStepIndex + 1} - ${bottleneckStep.displayName}
 Bottleneck Rate:       ${bottleneckRate.toFixed(3)} units/sec
 
 ================================================================================
+PARALLEL MACHINE ANALYSIS
+================================================================================
+
+`;
+
+    const parallelSteps = stepMetrics.filter(s => s.stations.length > 1);
+    if (parallelSteps.length > 0) {
+      content += `Steps with Parallel Machines:\n`;
+      parallelSteps.forEach(step => {
+        content += `• Step ${step.stepNumber}: ${step.stations.length} machines\n`;
+        content += `  - Individual rates: ${step.stations.map(s => s.rate.toFixed(3)).join(' + ')} = ${step.combinedRate.toFixed(3)} units/sec\n`;
+        content += `  - Effective step cycle time: ${step.effectiveCycleTime.toFixed(2)}s (vs ${step.stations[0].effectiveCycleTime.toFixed(2)}s single machine)\n`;
+      });
+      content += `\n`;
+    } else {
+      content += `No parallel machines configured.\n\n`;
+    }
+
+    content += `================================================================================
 ANALYSIS & RECOMMENDATIONS
 ================================================================================
 
 CONSTRAINT IDENTIFICATION:
-• ${metrics[bottleneckIndex].name} is the system constraint
-• This station limits overall throughput to ${bottleneckRate.toFixed(3)} units/sec
-• Bottleneck takt time: ${metrics[bottleneckIndex].taktTime.toFixed(2)} seconds
+• Step ${bottleneckStepIndex + 1} (${bottleneckStep.displayName}) is the system constraint
+• This step limits overall throughput to ${bottleneckRate.toFixed(3)} units/sec
+• Bottleneck effective cycle time: ${bottleneckStep.effectiveCycleTime.toFixed(2)} seconds
 
 `;
 
-    const underutilized = metrics.filter(m => m.utilization < 70);
-    if (underutilized.length > 0) {
-      content += `UNDERUTILIZED CAPACITY:
-`;
-      underutilized.forEach(m => {
-        const idlePercentage = 100 - m.utilization;
-        const canBeIdleTime = (idlePercentage / 100) * 60; // minutes per hour
-        content += `• ${m.name}: ${m.utilization.toFixed(1)}% utilized\n`;
+    const underutilizedSteps = stepMetrics.filter(s => s.utilization < 70);
+    if (underutilizedSteps.length > 0) {
+      content += `UNDERUTILIZED CAPACITY:\n`;
+      underutilizedSteps.forEach(step => {
+        const idlePercentage = 100 - step.utilization;
+        const canBeIdleTime = (idlePercentage / 100) * 60;
+        content += `• Step ${step.stepNumber} (${step.displayName}): ${step.utilization.toFixed(1)}% utilized\n`;
         content += `  - Can be idle ${idlePercentage.toFixed(1)}% of the time (${canBeIdleTime.toFixed(1)} min/hour)\n`;
-        content += `  - Running this station continuously creates unnecessary inventory\n`;
       });
       content += `\n`;
     }
 
     content += `IMPROVEMENT RECOMMENDATIONS:
-1. Focus on the bottleneck (${metrics[bottleneckIndex].name}):
-   - Current: ${metrics[bottleneckIndex].operators} operator(s), ${metrics[bottleneckIndex].cycleTime}s cycle time
-   - Adding 1 operator would increase rate to ${((metrics[bottleneckIndex].operators + 1) / metrics[bottleneckIndex].cycleTime).toFixed(3)} units/sec
-   - Reducing cycle time by 20% would increase rate to ${(metrics[bottleneckIndex].operators / (metrics[bottleneckIndex].cycleTime * 0.8)).toFixed(3)} units/sec
+1. Focus on the bottleneck (Step ${bottleneckStepIndex + 1} - ${bottleneckStep.displayName}):
+   - Current combined rate: ${bottleneckStep.combinedRate.toFixed(3)} units/sec
+   - Adding 1 parallel machine would increase step capacity by ~${(bottleneckStep.combinedRate / bottleneckStep.stations.length).toFixed(3)} units/sec
+   - This would elevate the constraint and potentially create a new bottleneck
 
-2. Do NOT invest in non-bottleneck stations:
-   - Improvements to other stations will not increase system throughput
+2. Do NOT invest in non-bottleneck steps:
+   - Improvements to other steps will not increase system throughput
    - Focus all resources on eliminating or elevating the constraint
 
 3. Protect the bottleneck:
-   - Ensure upstream stations maintain buffer inventory
-   - Minimize downtime at ${metrics[bottleneckIndex].name}
+   - Ensure upstream steps maintain buffer inventory
+   - Minimize downtime at Step ${bottleneckStepIndex + 1}
    - Consider quality checks before the bottleneck to prevent waste
 
 ================================================================================
-STATION DETAILS
+INDIVIDUAL STATION DETAILS
 ================================================================================
 
 `;
@@ -366,15 +494,13 @@ STATION DETAILS
       content += `  Configuration:\n`;
       content += `    - Cycle Time: ${m.cycleTime}s\n`;
       content += `    - Operators: ${m.operators}\n`;
-      content += `    - Takt Time: ${m.taktTime.toFixed(2)}s per unit\n`;
+      content += `    - Effective Cycle Time: ${m.effectiveCycleTime.toFixed(2)}s per unit\n`;
+      content += `    - Setup Time: ${m.setupTime}s per ${m.batchSize} pcs\n`;
+      content += `    - Uptime: ${m.uptimePercent}%\n`;
       content += `  Performance:\n`;
-      content += `    - Maximum Rate: ${m.rate.toFixed(3)} units/sec\n`;
-      content += `    - Actual Utilization: ${m.utilization.toFixed(1)}%\n`;
-      content += `    - Idle Time: ${(100 - m.utilization).toFixed(1)}%\n`;
-      if (m.waitTime > 0) {
-        content += `    - Wait Time per Unit: ${m.waitTime.toFixed(2)}s\n`;
-      }
-      content += `  Status: ${m.isBottleneck ? 'CONSTRAINT (Bottleneck)' : 'Non-Constraint'}\n`;
+      content += `    - Individual Rate: ${m.rate.toFixed(3)} units/sec\n`;
+      content += `    - Theoretical Rate: ${m.theoreticalRate.toFixed(3)} units/sec\n`;
+      content += `  Status: ${m.isBottleneck ? 'PART OF CONSTRAINT (Bottleneck Step)' : 'Non-Constraint'}\n`;
       content += `\n`;
     });
 
@@ -389,8 +515,9 @@ The Theory of Constraints states that:
 4. Focus on identifying, exploiting, and elevating the constraint
 
 For this process:
-• The constraint is ${metrics[bottleneckIndex].name}
+• The constraint is Step ${bottleneckStepIndex + 1} (${bottleneckStep.displayName})
 • All improvement efforts should focus here first
+• Parallel machines at a step ADD their rates together
 • Once elevated, a new bottleneck may emerge - continuous improvement
 
 ================================================================================
@@ -410,7 +537,7 @@ END OF REPORT
     URL.revokeObjectURL(url);
   };
 
-  const { metrics, bottleneckRate, bottleneckIndex } = calculateMetrics();
+  const { metrics, stepMetrics, bottleneckRate, bottleneckIndex, bottleneckStepIndex } = calculateMetrics();
 
   const handleNewVsm = () => {
     setStations([]);
@@ -602,6 +729,7 @@ END OF REPORT
                           <div className="flex flex-wrap gap-1.5 sm:gap-2">
                             {machinesByCell[cellName].map((machine) => {
                               const alreadyAdded = stations.some(s => s.machineId === machine.id);
+                              const idSuffix = machine.machineId.slice(-3);
                                   return (
                                 <Button
                                   key={machine.id}
@@ -613,6 +741,7 @@ END OF REPORT
                                 >
                                   <Factory className="h-3 w-3 sm:h-4 sm:w-4" />
                                   <span className="truncate max-w-[80px] sm:max-w-none">{machine.name}</span>
+                                  <Badge variant="outline" className="ml-1 text-xs font-mono">{idSuffix}</Badge>
                                   {alreadyAdded && <Badge variant="secondary" className="ml-1 text-xs">✓</Badge>}
                                 </Button>
                               );
@@ -667,10 +796,19 @@ END OF REPORT
                     const stationsInStep = stepGroups.get(step)!;
                     const isParallel = stationsInStep.length > 1;
                     
-                    // Build display for this step
-                    const displayIds = stationsInStep.map(s => 
-                      s.machineId ? getShortId(s.name) : s.name.substring(0, 6)
-                    );
+                    // Build display for this step - show machine name with last 3 of machine ID
+                    const displayIds = stationsInStep.map(s => {
+                      let idSuffix = '';
+                      if (s.machineIdDisplay) {
+                        idSuffix = getShortId(s.machineIdDisplay);
+                      } else if (s.machineId) {
+                        const machine = machines.find(m => m.id === s.machineId);
+                        if (machine) {
+                          idSuffix = getShortId(machine.machineId);
+                        }
+                      }
+                      return idSuffix ? `${s.name} (${idSuffix})` : s.name;
+                    });
                     
                     return (
                       <div key={step} className="flex items-center gap-1.5 sm:gap-2">
@@ -824,89 +962,234 @@ END OF REPORT
 
         {/* Value Stream Map */}
         <div className="border rounded-lg p-3 sm:p-6 bg-card">
-          <h2 className="text-lg sm:text-xl font-bold mb-4 sm:mb-6">Value Stream Analysis</h2>
+          <div className="flex items-center justify-between mb-4 sm:mb-6">
+            <h2 className="text-lg sm:text-xl font-bold">Value Stream Analysis</h2>
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-1">
+                  <HelpCircle className="h-4 w-4" />
+                  <span className="hidden sm:inline">Calculations</span>
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-2xl max-h-[80vh]">
+                <DialogHeader>
+                  <DialogTitle>VSM Calculations Explained</DialogTitle>
+                </DialogHeader>
+                <ScrollArea className="h-[60vh] pr-4">
+                  <div className="space-y-4 text-sm">
+                    <div>
+                      <h4 className="font-bold text-base mb-2">📊 Individual Station Metrics</h4>
+                      <div className="space-y-3 pl-2">
+                        <div>
+                          <div className="font-semibold">Effective Cycle Time</div>
+                          <code className="text-xs bg-muted px-1 rounded">Effective CT = Cycle Time + (Setup Time ÷ Batch Size)</code>
+                          <p className="text-muted-foreground text-xs mt-1">Setup time is amortized across the batch to get the true per-part processing time.</p>
+                        </div>
+                        <div>
+                          <div className="font-semibold">Theoretical Rate</div>
+                          <code className="text-xs bg-muted px-1 rounded">Theoretical Rate = Operators ÷ Effective CT</code>
+                          <p className="text-muted-foreground text-xs mt-1">Maximum possible output assuming 100% uptime (units per second).</p>
+                        </div>
+                        <div>
+                          <div className="font-semibold">Actual Rate</div>
+                          <code className="text-xs bg-muted px-1 rounded">Actual Rate = Theoretical Rate × (Uptime% ÷ 100)</code>
+                          <p className="text-muted-foreground text-xs mt-1">Realistic output accounting for machine downtime.</p>
+                        </div>
+                        <div>
+                          <div className="font-semibold">Takt Time</div>
+                          <code className="text-xs bg-muted px-1 rounded">Takt Time = 1 ÷ Actual Rate</code>
+                          <p className="text-muted-foreground text-xs mt-1">Time between completed units leaving the station (seconds per unit).</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="border-t pt-4">
+                      <h4 className="font-bold text-base mb-2">⚡ Parallel Machine Aggregation</h4>
+                      <div className="space-y-3 pl-2">
+                        <div>
+                          <div className="font-semibold">Combined Step Rate</div>
+                          <code className="text-xs bg-muted px-1 rounded">Step Rate = Sum of all machine rates at that step</code>
+                          <p className="text-muted-foreground text-xs mt-1">Parallel machines ADD their capacity. Two machines at 1/min each = 2/min combined.</p>
+                        </div>
+                        <div>
+                          <div className="font-semibold">Effective Step Cycle Time</div>
+                          <code className="text-xs bg-muted px-1 rounded">Step CT = 1 ÷ Combined Step Rate</code>
+                          <p className="text-muted-foreground text-xs mt-1">Time between units leaving this process step.</p>
+                        </div>
+                        <div className="bg-blue-50 dark:bg-blue-950/30 p-2 rounded text-xs">
+                          <strong>Example:</strong> Step has 2 machines, each with 60s cycle time<br/>
+                          • Individual rate: 1/60 = 0.0167/sec each<br/>
+                          • Combined rate: 0.0167 + 0.0167 = 0.0333/sec<br/>
+                          • Effective step CT: 1/0.0333 = 30 seconds<br/>
+                          → One unit exits every 30 seconds (not 60!)
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="border-t pt-4">
+                      <h4 className="font-bold text-base mb-2">🎯 System Metrics</h4>
+                      <div className="space-y-3 pl-2">
+                        <div>
+                          <div className="font-semibold">Bottleneck Identification</div>
+                          <code className="text-xs bg-muted px-1 rounded">Bottleneck = Step with LOWEST combined rate</code>
+                          <p className="text-muted-foreground text-xs mt-1">The constraint that limits entire system throughput.</p>
+                        </div>
+                        <div>
+                          <div className="font-semibold">System Throughput</div>
+                          <code className="text-xs bg-muted px-1 rounded">Throughput = Bottleneck Rate</code>
+                          <p className="text-muted-foreground text-xs mt-1">No matter how fast other steps are, output is limited by the constraint.</p>
+                        </div>
+                        <div>
+                          <div className="font-semibold">Station Utilization</div>
+                          <code className="text-xs bg-muted px-1 rounded">Utilization = (Bottleneck Rate ÷ Station Rate) × 100%</code>
+                          <p className="text-muted-foreground text-xs mt-1">How much of capacity is actually used. Non-bottlenecks are &lt;100%.</p>
+                        </div>
+                        <div>
+                          <div className="font-semibold">Wait Time</div>
+                          <code className="text-xs bg-muted px-1 rounded">Wait = (1/Prev Rate) - (1/Current Rate)</code>
+                          <p className="text-muted-foreground text-xs mt-1">Time a faster station waits for upstream to deliver parts.</p>
+                        </div>
+                        <div>
+                          <div className="font-semibold">Total Lead Time</div>
+                          <code className="text-xs bg-muted px-1 rounded">Lead Time = Sum of all step effective cycle times</code>
+                          <p className="text-muted-foreground text-xs mt-1">End-to-end time for one part to traverse the entire process.</p>
+                        </div>
+                        <div>
+                          <div className="font-semibold">Process Efficiency</div>
+                          <code className="text-xs bg-muted px-1 rounded">Efficiency = (Bottleneck Rate ÷ Fastest Rate) × 100%</code>
+                          <p className="text-muted-foreground text-xs mt-1">How balanced the line is. 100% means all steps run at same rate.</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="border-t pt-4">
+                      <h4 className="font-bold text-base mb-2">📈 Theory of Constraints</h4>
+                      <div className="text-xs text-muted-foreground space-y-2 pl-2">
+                        <p><strong>1. Identify</strong> the constraint (bottleneck step)</p>
+                        <p><strong>2. Exploit</strong> it - maximize bottleneck efficiency</p>
+                        <p><strong>3. Subordinate</strong> - align all other steps to support the bottleneck</p>
+                        <p><strong>4. Elevate</strong> - invest in bottleneck capacity (more machines, operators, or reduce CT)</p>
+                        <p><strong>5. Repeat</strong> - a new constraint will emerge</p>
+                        <div className="bg-yellow-50 dark:bg-yellow-950/30 p-2 rounded mt-2">
+                          <strong>Key insight:</strong> Improving non-bottleneck stations does NOT increase throughput. It only creates excess inventory and wasted resources.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </ScrollArea>
+              </DialogContent>
+            </Dialog>
+          </div>
           
-          {metrics.length > 0 ? (
+          {metrics.length > 0 && stepMetrics.length > 0 ? (
             <div className="space-y-4 sm:space-y-6">
-              {/* Process Flow - Adaptive sizing */}
+              {/* Process Flow - Step-based visualization with parallel machine support */}
               <div className="overflow-x-auto overflow-y-visible pb-4 pt-2 sm:pt-4">
                 <div className="flex items-start gap-2 sm:gap-3 mx-auto" style={{ 
                   width: 'fit-content',
                   maxWidth: '100%',
                   minHeight: '320px'
                 }}>
-                  {metrics.map((m, index) => {
-                    // More aggressive sizing for mobile
-                    const boxWidth = metrics.length <= 2 ? '180px' : 
-                                    metrics.length <= 3 ? '160px' : 
-                                    metrics.length <= 5 ? '140px' : 
-                                    metrics.length <= 7 ? '120px' : '100px';
+                  {stepMetrics.map((step, stepIndex) => {
+                    const isParallel = step.stations.length > 1;
+                    // Sizing based on number of steps, not individual stations
+                    const boxWidth = stepMetrics.length <= 2 ? '200px' : 
+                                    stepMetrics.length <= 3 ? '180px' : 
+                                    stepMetrics.length <= 5 ? '160px' : 
+                                    stepMetrics.length <= 7 ? '140px' : '120px';
                     
                     return (
-                      <div key={m.id} className="flex items-start gap-2 sm:gap-3 flex-shrink-0">
+                      <div key={step.stepNumber} className="flex items-start gap-2 sm:gap-3 flex-shrink-0">
                         <div className="flex flex-col items-center flex-shrink-0" style={{ width: boxWidth }}>
-                          {/* Process Box */}
-                          <div className={`w-full p-2 sm:p-4 rounded-lg border-2 ${m.isBottleneck ? 'bg-destructive/10 border-destructive' : 'bg-muted border-border'}`}>
+                          {/* Process Step Box */}
+                          <div className={`w-full p-2 sm:p-4 rounded-lg border-2 ${step.isBottleneck ? 'bg-destructive/10 border-destructive' : isParallel ? 'bg-blue-50 dark:bg-blue-950/30 border-blue-500' : 'bg-muted border-border'}`}>
                             <div className="text-center">
-                              <div className="font-bold text-xs sm:text-base mb-1 break-words leading-tight">{m.name}</div>
-                              {m.isBottleneck && (
-                                <div className="flex items-center justify-center gap-1 text-destructive text-[10px] sm:text-xs mb-1 sm:mb-2">
-                                  <AlertTriangle className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
-                                  <span className="hidden xs:inline">BOTTLENECK</span>
-                                  <span className="xs:hidden">BTN</span>
+                              {/* Step header */}
+                              <div className="text-[10px] sm:text-xs text-muted-foreground mb-1">Step {step.stepNumber}</div>
+                              
+                              {isParallel ? (
+                                // Parallel machines display
+                                <div className="space-y-1">
+                                  <Badge variant="outline" className="text-[10px] border-blue-500 text-blue-600 dark:text-blue-400">
+                                    {step.stations.length} Parallel
+                                  </Badge>
+                                  <div className="text-[10px] sm:text-xs space-y-0.5">
+                                    {step.stations.map(s => (
+                                      <div key={s.id} className="font-medium truncate">{s.name}</div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : (
+                                // Single machine display
+                                <div className="font-bold text-xs sm:text-base mb-1 break-words leading-tight">
+                                  {step.stations[0]?.name}
                                 </div>
                               )}
-                              <div className="text-[10px] sm:text-xs text-muted-foreground space-y-0.5 sm:space-y-1">
-                                <div>C/T: <span className="font-semibold">{m.cycleTime}s</span></div>
-                                <div>Ops: <span className="font-semibold">{m.operators}</span></div>
-                                {m.setupTime > 0 && (
-                                  <div className="text-orange-500">Setup: <span className="font-semibold">{m.setupTime}s/{m.batchSize}pc</span></div>
-                                )}
-                                {m.uptimePercent < 100 && (
-                                  <div className="text-destructive">Up: <span className="font-semibold">{m.uptimePercent}%</span></div>
+                              
+                              {step.isBottleneck && (
+                                <div className="flex items-center justify-center gap-1 text-destructive text-[10px] sm:text-xs mt-1 sm:mt-2">
+                                  <AlertTriangle className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
+                                  <span>BOTTLENECK</span>
+                                </div>
+                              )}
+                              
+                              {/* Station details */}
+                              <div className="text-[10px] sm:text-xs text-muted-foreground space-y-0.5 sm:space-y-1 mt-2">
+                                {isParallel ? (
+                                  <>
+                                    <div>Total Ops: <span className="font-semibold">{step.totalOperators}</span></div>
+                                    <div className="text-blue-600 dark:text-blue-400">Combined</div>
+                                  </>
+                                ) : (
+                                  <>
+                                    <div>C/T: <span className="font-semibold">{step.stations[0]?.cycleTime}s</span></div>
+                                    <div>Ops: <span className="font-semibold">{step.stations[0]?.operators}</span></div>
+                                    {step.stations[0]?.setupTime > 0 && (
+                                      <div className="text-orange-500">Setup: <span className="font-semibold">{step.stations[0].setupTime}s/{step.stations[0].batchSize}pc</span></div>
+                                    )}
+                                    {step.stations[0]?.uptimePercent < 100 && (
+                                      <div className="text-destructive">Up: <span className="font-semibold">{step.stations[0].uptimePercent}%</span></div>
+                                    )}
+                                  </>
                                 )}
                               </div>
                             </div>
                           </div>
                           
-                          {/* Data Box */}
+                          {/* Step Data Box */}
                           <div className="w-full mt-2 sm:mt-3 p-2 sm:p-3 bg-background rounded border">
                             <div className="text-[10px] sm:text-xs space-y-1 sm:space-y-1.5">
                               <div className="flex justify-between items-center">
-                                <span className="text-muted-foreground">Eff:</span>
-                                <span className="font-bold">{m.effectiveCycleTime.toFixed(1)}s</span>
+                                <span className="text-muted-foreground">Eff CT:</span>
+                                <span className="font-bold">{step.effectiveCycleTime.toFixed(1)}s</span>
                               </div>
                               <div className="flex justify-between items-center">
-                                <span className="text-muted-foreground">Takt:</span>
-                                <span className="font-bold">{m.taktTime.toFixed(1)}s</span>
+                                <span className="text-muted-foreground">{isParallel ? 'Comb Rate:' : 'Rate:'}</span>
+                                <span className="font-bold text-blue-500">{step.combinedRate.toFixed(3)}/s</span>
                               </div>
-                              <div className="flex justify-between items-center">
-                                <span className="text-muted-foreground">Rate:</span>
-                                <span className="font-bold text-blue-500">{m.rate.toFixed(3)}/s</span>
-                              </div>
-                              {(m.setupTime > 0 || m.uptimePercent < 100) && (
-                                <div className="flex justify-between items-center">
-                                  <span className="text-muted-foreground">Max:</span>
-                                  <span className="font-bold text-muted-foreground/50">{m.theoreticalRate.toFixed(3)}/s</span>
+                              {isParallel && (
+                                <div className="flex justify-between items-center text-blue-600 dark:text-blue-400">
+                                  <span className="text-muted-foreground">Per Machine:</span>
+                                  <span className="font-bold">{(step.combinedRate / step.stations.length).toFixed(3)}/s</span>
                                 </div>
                               )}
                               <div className="flex justify-between items-center">
                                 <span className="text-muted-foreground">Util:</span>
-                                <span className={`font-bold ${m.utilization < 80 ? 'text-yellow-500' : 'text-green-500'}`}>
-                                  {m.utilization.toFixed(0)}%
+                                <span className={`font-bold ${step.utilization < 80 ? 'text-yellow-500' : 'text-green-500'}`}>
+                                  {step.utilization.toFixed(0)}%
                                 </span>
                               </div>
-                              {m.waitTime > 0 && (
+                              {step.waitTime > 0 && (
                                 <div className="flex justify-between items-center">
-                                  <span className="text-muted-foreground">Idle:</span>
-                                  <span className="font-bold text-orange-500">{m.waitTime.toFixed(1)}s</span>
+                                  <span className="text-muted-foreground">Wait:</span>
+                                  <span className="font-bold text-orange-500">{step.waitTime.toFixed(1)}s</span>
                                 </div>
                               )}
                             </div>
                           </div>
                         </div>
                         
-                        {index < metrics.length - 1 && (
+                        {stepIndex < stepMetrics.length - 1 && (
                           <div className="text-xl sm:text-3xl text-muted-foreground font-bold flex-shrink-0" style={{ marginTop: '40px' }}>
                             →
                           </div>
@@ -931,7 +1214,7 @@ END OF REPORT
                 <div className="bg-muted p-3 sm:p-4 rounded border">
                   <div className="text-xs sm:text-sm text-muted-foreground mb-1">Total Lead Time</div>
                   <div className="text-lg sm:text-2xl font-bold text-blue-600">
-                    {metrics.reduce((sum, m) => sum + m.taktTime, 0).toFixed(1)} <span className="text-xs sm:text-sm">sec</span>
+                    {stepMetrics.reduce((sum, s) => sum + s.effectiveCycleTime, 0).toFixed(1)} <span className="text-xs sm:text-sm">sec</span>
                   </div>
                   <div className="text-[10px] sm:text-xs text-muted-foreground mt-1">
                     End-to-end process time
@@ -940,25 +1223,31 @@ END OF REPORT
                 <div className="bg-muted p-3 sm:p-4 rounded border">
                   <div className="text-xs sm:text-sm text-muted-foreground mb-1">Process Efficiency</div>
                   <div className="text-lg sm:text-2xl font-bold text-yellow-600">
-                    {((bottleneckRate / Math.max(...metrics.map(m => m.rate))) * 100).toFixed(0)}%
+                    {((bottleneckRate / Math.max(...stepMetrics.map(s => s.combinedRate))) * 100).toFixed(0)}%
                   </div>
                   <div className="text-[10px] sm:text-xs text-muted-foreground mt-1">
-                    Capacity utilization
+                    Line balance
                   </div>
                 </div>
               </div>
 
-              {/* Insights */}
+              {/* Insights - Using step metrics */}
               <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 p-3 sm:p-4 rounded">
                 <h3 className="font-bold mb-2 text-sm sm:text-base text-blue-700 dark:text-blue-300">💡 Key Insights</h3>
                 <div className="text-xs sm:text-sm space-y-1">
-                  <div>• <span className="text-blue-600 dark:text-blue-400 font-bold">{metrics[bottleneckIndex].name}</span> is your constraint - limiting output to {bottleneckRate.toFixed(3)} units/sec</div>
-                  {metrics.filter(m => m.utilization < 70).length > 0 && (
-                    <div>• <span className="text-yellow-600 dark:text-yellow-400">{metrics.filter(m => m.utilization < 70).map(m => m.name).join(', ')}</span> can be idle {((100 - Math.max(...metrics.filter(m => m.utilization < 70).map(m => m.utilization)))).toFixed(0)}% without reducing output</div>
+                  <div>• <span className="text-blue-600 dark:text-blue-400 font-bold">{stepMetrics[bottleneckStepIndex]?.displayName}</span> is your constraint - limiting output to {bottleneckRate.toFixed(3)} units/sec ({(bottleneckRate * 3600).toFixed(0)}/hr)</div>
+                  {stepMetrics.filter(s => s.utilization < 70).length > 0 && (
+                    <div>• <span className="text-yellow-600 dark:text-yellow-400">{stepMetrics.filter(s => s.utilization < 70).map(s => s.displayName).join(', ')}</span> can be idle up to {(100 - Math.min(...stepMetrics.filter(s => s.utilization < 70).map(s => s.utilization))).toFixed(0)}% without reducing output</div>
                   )}
-                  <div>• To increase throughput: Add operators to <span className="font-bold">{metrics[bottleneckIndex].name}</span> or reduce its cycle time</div>
-                  <div className="hidden sm:block">• Improving non-bottleneck stations will not increase overall output</div>
-                  <div className="hidden sm:block">• Running non-bottlenecks at full capacity wastes resources and creates excess inventory</div>
+                  {stepMetrics[bottleneckStepIndex]?.stations.length === 1 ? (
+                    <div>• To increase throughput: Add parallel machine to Step {bottleneckStepIndex + 1}, add operators, or reduce cycle time</div>
+                  ) : (
+                    <div>• To increase throughput: Add more parallel machines to Step {bottleneckStepIndex + 1} or reduce individual cycle times</div>
+                  )}
+                  <div className="hidden sm:block">• Improving non-bottleneck steps will not increase overall output</div>
+                  {stepMetrics.some(s => s.stations.length > 1) && (
+                    <div className="text-blue-600 dark:text-blue-400 hidden sm:block">• Parallel machines at same step combine their rates (e.g., 2× machines = 2× capacity)</div>
+                  )}
                 </div>
               </div>
             </div>
