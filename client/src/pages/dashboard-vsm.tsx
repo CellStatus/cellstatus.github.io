@@ -512,7 +512,7 @@ export default function Dashboard() {
                                 key={machine.id}
                                 machine={machine}
                                 onStatusChange={handleStatusChange}
-                                onUpdateMachine={(data) => updateMachineMutation.mutate(data)}
+                                onUpdateMachine={(data: { id: string } & Partial<Machine>) => updateMachineMutation.mutate(data)}
                                 onStatusNoteChange={handleStatusNoteChange}
                                 onDeleteMachine={handleDeleteMachine}
                                 isPending={updateMachineMutation.isPending || updateStatusNoteMutation.isPending}
