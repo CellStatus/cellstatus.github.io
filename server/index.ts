@@ -77,6 +77,10 @@ app.use((req, res, next) => {
   const path = req.path;
   let capturedJsonResponse: Record<string, any> | undefined = undefined;
 
+  // Get client IP (handles proxies)
+  const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+  const userAgent = req.headers['user-agent'] || 'unknown';
+
   const originalResJson = res.json;
   res.json = function (bodyJson, ...args) {
     capturedJsonResponse = bodyJson;
@@ -88,10 +92,14 @@ app.use((req, res, next) => {
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
       if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+        logLine += ` :: ${JSON.stringify(capturedJsonResponse).substring(0, 200)}`;
       }
-
       log(logLine);
+    }
+    
+    // Log page visits (non-API requests) - useful for tracking users
+    if (!path.startsWith("/api") && !path.includes(".") && req.method === "GET") {
+      log(`PAGE VISIT: ${path} from ${clientIp} (${userAgent.substring(0, 50)})`, "access");
     }
   });
 
