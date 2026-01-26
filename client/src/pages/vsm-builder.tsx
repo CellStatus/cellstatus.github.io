@@ -43,6 +43,49 @@ type Machine = {
   setupTime?: number;
 };
 
+// Numeric input that waits for blur before committing to avoid updating while typing
+function NumericInput({ 
+  value, 
+  onChange, 
+  placeholder,
+  className = '',
+}: { 
+  value: number | undefined | null;
+  onChange: (val: number | undefined) => void;
+  placeholder?: string;
+  className?: string;
+}) {
+  const [localValue, setLocalValue] = useState<string>(value?.toString() ?? '');
+  
+  // Sync local state when prop changes from outside
+  useEffect(() => {
+    setLocalValue(value?.toString() ?? '');
+  }, [value]);
+  
+  const handleBlur = () => {
+    const parsed = localValue.trim() === '' ? undefined : Number(localValue);
+    onChange(parsed === undefined || isNaN(parsed) ? undefined : parsed);
+  };
+  
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      (e.target as HTMLInputElement).blur();
+    }
+  };
+  
+  return (
+    <Input
+      inputMode="numeric"
+      value={localValue}
+      onChange={(e) => setLocalValue(e.target.value)}
+      onBlur={handleBlur}
+      onKeyDown={handleKeyDown}
+      placeholder={placeholder}
+      className={`${className} [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
+    />
+  );
+}
+
 function renderStations(stationsJson: unknown, machinesById: Record<string, Machine> = {}, machinesByMachineId: Record<string, Machine> = {}) {
   if (!stationsJson) return null;
   const data = stationsJson as any;
@@ -50,34 +93,43 @@ function renderStations(stationsJson: unknown, machinesById: Record<string, Mach
   const operationNames: Record<number, string> = data.operationNames || {};
   if (!stations || stations.length === 0) return null;
   
-  // Group stations by process step
-  const stepGroups = new Map<number, any[]>();
+  // Group stations by process step and collect machine info
+  const stepData = new Map<number, { machines: Array<{ name: string; idSuffix: string }> }>();
   stations.forEach((station: any) => {
     const step = station.processStep || 1;
-    if (!stepGroups.has(step)) stepGroups.set(step, []);
-    stepGroups.get(step)!.push(station);
+    const machineName = station.name || station.opName || 'Machine';
+    const machineId = station.machineIdDisplay || station.machineId || '';
+    const idSuffix = machineId.slice(-3);
+    
+    if (!stepData.has(step)) {
+      stepData.set(step, { machines: [{ name: machineName, idSuffix }] });
+    } else {
+      stepData.get(step)!.machines.push({ name: machineName, idSuffix });
+    }
   });
   
-  const sortedSteps = Array.from(stepGroups.entries()).sort((a, b) => a[0] - b[0]);
+  const sortedSteps = Array.from(stepData.entries()).sort((a, b) => a[0] - b[0]);
   
   return (
     <div className="flex flex-wrap items-center gap-1 py-2">
-      {sortedSteps.map(([step, stationsInStep], idx: number) => {
+      {sortedSteps.map(([step, data], idx: number) => {
         // Get display name: operation name first, then first machine name
-        const machineNames = stationsInStep.map((s: any) => s.name || s.opName || s.operationName || '').filter(Boolean);
-        const displayName = operationNames[step] || (machineNames.length > 0 ? machineNames[0] : `Op ${step}`);
-        const machineCount = stationsInStep.length;
+        const displayName = operationNames[step] || data.machines[0]?.name || `Op ${step}`;
+        const machineCount = data.machines.length;
+        const tooltipLines = [
+          `${machineCount} Machine${machineCount > 1 ? 's' : ''}`,
+          ...data.machines.map(m => m.idSuffix ? `${m.name} (...${m.idSuffix})` : m.name)
+        ];
         
         return (
           <div key={step} className="flex items-center gap-1">
             <Badge 
               variant="outline" 
               className="text-xs"
-              title={machineCount > 1 ? `${machineCount} machines at this step` : undefined}
+              title={tooltipLines.join('\n')}
             >
               <span className="text-muted-foreground mr-1">Op{step}:</span>
               <span>{displayName}</span>
-              {machineCount > 1 && <span className="text-muted-foreground ml-1">(×{machineCount})</span>}
             </Badge>
             {idx < sortedSteps.length - 1 && <ArrowRight className="h-3 w-3 text-muted-foreground flex-shrink-0" />}
           </div>
@@ -93,6 +145,47 @@ function normalizeStationsInput(stationsJson: any) {
   if (stationsJson.stations && Array.isArray(stationsJson.stations)) return stationsJson.stations;
   if (stationsJson.stationsJson && Array.isArray(stationsJson.stationsJson)) return stationsJson.stationsJson;
   return [];
+}
+
+// Helper function to export VSM to Downloads/VSM Reports folder
+async function exportVsmToFile(markdown: string, vsmName: string) {
+  const safeName = vsmName.replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '_');
+  const timestamp = new Date().toISOString().slice(0, 10);
+  const filename = `${safeName}_${timestamp}.md`;
+  
+  // Use File System Access API if available to save to Downloads/VSM Reports
+  if ('showSaveFilePicker' in window) {
+    try {
+      const handle = await (window as any).showSaveFilePicker({
+        suggestedName: filename,
+        startIn: 'downloads',
+        types: [{
+          description: 'Markdown Files',
+          accept: { 'text/markdown': ['.md'] },
+        }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(markdown);
+      await writable.close();
+      return true;
+    } catch (e: any) {
+      // User cancelled or API not fully supported
+      if (e.name === 'AbortError') return false;
+      // Fall through to legacy download
+    }
+  }
+  
+  // Fallback for browsers without File System Access API
+  const blob = new Blob([markdown], { type: 'text/markdown' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  return true;
 }
 
 // Group stations by process step for visual flow
@@ -182,7 +275,7 @@ function VisualProcessFlow({
             />
           ) : (
             <div className={`text-lg font-bold ${metrics?.isRawMaterialBottleneck ? 'text-orange-600' : 'text-blue-600'}`}>
-              {rawMaterialUPH ? Math.round(rawMaterialUPH).toLocaleString() : '∞'}
+              {rawMaterialUPH ? rawMaterialUPH.toFixed(1) : '∞'}
             </div>
           )}
           <div className={`text-[10px] ${metrics?.isRawMaterialBottleneck ? 'text-orange-500' : 'text-blue-500'}`}>UPH</div>
@@ -243,13 +336,13 @@ function VisualProcessFlow({
                 <div className="text-xs text-muted-foreground">{stationsInStep.length} machine(s)</div>
                 {stepMetric && (
                   <div className="text-xs text-muted-foreground border-t pt-1 mt-1 space-y-0.5">
-                    <div title={`Combined UPH = Sum of individual machine UPHs\n${stationsInStep.map((s: any) => `${s.name || s.machineIdDisplay || 'Machine'}: ${Math.round(computeStationUPH(s))} UPH`).join('\n')}\nTotal: ${Math.round(stepMetric.combinedRateUPH)} UPH`}>
-                      Rate: <span className="font-medium text-foreground">{Math.round(stepMetric.combinedRateUPH).toLocaleString()} UPH</span>
+                    <div title={`Combined UPH = Sum of individual machine UPHs\n${stationsInStep.map((s: any) => `${s.name || s.machineIdDisplay || 'Machine'}: ${computeStationUPH(s).toFixed(1)} UPH`).join('\n')}\nTotal: ${stepMetric.combinedRateUPH.toFixed(1)} UPH`}>
+                      Rate: <span className="font-medium text-foreground">{stepMetric.combinedRateUPH.toFixed(1)} UPH</span>
                     </div>
-                    <div title={`Average Cycle Time across ${stationsInStep.length} machine(s)\n${stationsInStep.map((s: any) => `${s.name || s.machineIdDisplay || 'Machine'}: ${s.cycleTime || 60}s`).join('\n')}\nAverage: ${stepMetric.avgStationCT.toFixed(1)}s`}>
-                      CT: <span className="font-medium text-foreground">{stepMetric.avgStationCT.toFixed(1)}s</span>
+                    <div title={`Effective CT = Time between units leaving this operation\n= 3600 / Combined UPH\n= 3600 / ${stepMetric.combinedRateUPH.toFixed(2)}\n= ${stepMetric.effectiveCTsec.toFixed(2)}s\n\nWith ${stationsInStep.length} parallel machine(s), effective CT is reduced.`}>
+                      Eff CT: <span className="font-medium text-foreground">{stepMetric.effectiveCTsec.toFixed(1)}s</span>
                     </div>
-                    <div title={`Utilization = (System Throughput / Operation Capacity) × 100%\n= (${Math.round(metrics?.systemThroughputUPH || 0)} / ${Math.round(stepMetric.combinedRateUPH)}) × 100%\n= ${stepMetric.avgUtilPercent.toFixed(1)}%`}>
+                    <div title={`Utilization = (System Throughput / Operation Capacity) × 100%\n= (${(metrics?.systemThroughputUPH || 0).toFixed(1)} / ${stepMetric.combinedRateUPH.toFixed(1)}) × 100%\n= ${stepMetric.avgUtilPercent.toFixed(1)}%`}>
                       Util: <span className={`font-medium ${stepMetric.avgUtilPercent >= 95 ? 'text-red-600' : stepMetric.avgUtilPercent >= 80 ? 'text-amber-600' : 'text-green-600'}`}>{stepMetric.avgUtilPercent.toFixed(0)}%</span>
                     </div>
                     {stepMetric.waitingTimeSec > 0 && (
@@ -273,7 +366,7 @@ function VisualProcessFlow({
                     // Tooltip with calculation
                     const calcTooltip = `Per-Unit CT = ${displayCT} + (${displaySetup}/${displayBatch}) = ${perUnitCT.toFixed(1)}s
 Eff CT = ${perUnitCT.toFixed(1)} / ${displayUptime}% = ${effCT.toFixed(1)}s/unit
-UPH = 3600 / ${effCT.toFixed(1)} = ${Math.round(machineUPH)}`;
+UPH = 3600 / ${effCT.toFixed(1)} = ${machineUPH.toFixed(1)}`;
                     return (
                       <div 
                         key={s.id || idx} 
@@ -282,7 +375,7 @@ UPH = 3600 / ${effCT.toFixed(1)} = ${Math.round(machineUPH)}`;
                       >
                         <div className="flex items-center justify-between">
                           <div className="font-medium">{s.name}</div>
-                          <div className="font-bold text-primary">{Math.round(machineUPH)} UPH</div>
+                          <div className="font-bold text-primary">{machineUPH.toFixed(1)} UPH</div>
                         </div>
                         <div className="text-muted-foreground flex flex-wrap items-center gap-x-2">
                           {s.machineIdDisplay && <span>#{s.machineIdDisplay}</span>}
@@ -290,7 +383,7 @@ UPH = 3600 / ${effCT.toFixed(1)} = ${Math.round(machineUPH)}`;
                           <span>Up: {displayUptime}%</span>
                           <span>Pcs/Setup: {displayBatch}</span>
                           <span>Setup: {displaySetup}s</span>
-                          <span className="text-blue-500 font-medium">→ {effCT.toFixed(1)}s/unit</span>
+                          <span className="text-blue-500 font-medium" title={`Effective CT = (CT + Setup/Batch) / Uptime%\n= (${displayCT} + ${displaySetup}/${displayBatch}) / ${displayUptime}%\n= ${effCT.toFixed(1)}s/unit`}>Eff CT: {effCT.toFixed(1)}s</span>
                         </div>
                       </div>
                     );
@@ -335,19 +428,18 @@ UPH = 3600 / ${effCT.toFixed(1)} = ${Math.round(machineUPH)}`;
               </div>
               <div className="flex items-center gap-2 mt-2">
                 <Label className="text-xs">WIP Before Operation:</Label>
-                <Input
-                  inputMode="numeric"
-                  value={selectedStations[0]?.wipBefore ?? ''}
-                  onChange={(e) => {
+                <NumericInput
+                  value={selectedStations[0]?.wipBefore}
+                  onChange={(val) => {
                     // Set WIP on the first station of this step
                     const firstStation = selectedStations[0];
                     if (firstStation) {
                       const globalIdx = stations.findIndex(s => s.id === firstStation.id);
-                      updateStation(globalIdx, { wipBefore: e.target.value ? Number(e.target.value) : undefined });
+                      updateStation(globalIdx, { wipBefore: val });
                     }
                   }}
                   placeholder="0"
-                  className="h-7 text-sm w-20 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  className="h-7 text-sm w-20"
                 />
                 <span className="text-xs text-muted-foreground">units</span>
               </div>
@@ -379,51 +471,46 @@ UPH = 3600 / ${effCT.toFixed(1)} = ${Math.round(machineUPH)}`;
                     </div>
                     <div>
                       <Label className="text-xs">Cycle Time (sec)</Label>
-                      <Input
-                        inputMode="numeric"
-                        value={station.cycleTime ?? ''}
-                        onChange={(e) => updateStation(globalIdx, { cycleTime: e.target.value ? Number(e.target.value) : undefined })}
+                      <NumericInput
+                        value={station.cycleTime}
+                        onChange={(val) => updateStation(globalIdx, { cycleTime: val })}
                         placeholder="60"
-                        className="mt-1 h-8 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        className="mt-1 h-8 text-sm"
                       />
                     </div>
                     <div>
                       <Label className="text-xs">Setup Time (sec)</Label>
-                      <Input
-                        inputMode="numeric"
-                        value={station.setupTime ?? ''}
-                        onChange={(e) => updateStation(globalIdx, { setupTime: e.target.value ? Number(e.target.value) : undefined })}
+                      <NumericInput
+                        value={station.setupTime}
+                        onChange={(val) => updateStation(globalIdx, { setupTime: val })}
                         placeholder="0"
-                        className="mt-1 h-8 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        className="mt-1 h-8 text-sm"
                       />
                     </div>
                     <div>
                       <Label className="text-xs">Pcs/Setup</Label>
-                      <Input
-                        inputMode="numeric"
-                        value={station.batchSize ?? ''}
-                        onChange={(e) => updateStation(globalIdx, { batchSize: e.target.value ? Number(e.target.value) : undefined })}
+                      <NumericInput
+                        value={station.batchSize}
+                        onChange={(val) => updateStation(globalIdx, { batchSize: val })}
                         placeholder="1"
-                        className="mt-1 h-8 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        className="mt-1 h-8 text-sm"
                       />
                     </div>
                     <div>
                       <Label className="text-xs">Uptime %</Label>
-                      <Input
-                        inputMode="numeric"
-                        value={station.uptimePercent ?? ''}
-                        onChange={(e) => updateStation(globalIdx, { uptimePercent: e.target.value ? Number(e.target.value) : undefined })}
+                      <NumericInput
+                        value={station.uptimePercent}
+                        onChange={(val) => updateStation(globalIdx, { uptimePercent: val })}
                         placeholder="100"
-                        className="mt-1 h-8 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        className="mt-1 h-8 text-sm"
                       />
                     </div>
                     <div>
                       <Label className="text-xs">Op Step</Label>
-                      <Input
-                        inputMode="numeric"
-                        value={station.processStep || ''}
-                        onChange={(e) => updateStation(globalIdx, { processStep: Number(e.target.value) || 1 })}
-                        className="mt-1 h-8 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      <NumericInput
+                        value={station.processStep}
+                        onChange={(val) => updateStation(globalIdx, { processStep: val || 1 })}
+                        className="mt-1 h-8 text-sm"
                       />
                     </div>
                   </div>
@@ -596,7 +683,7 @@ function WipFlowSimulation({
           <div className={`flex flex-col items-center min-w-[80px] p-2 rounded-lg border ${metrics.isRawMaterialBottleneck ? 'bg-orange-500/10 border-orange-500' : 'bg-blue-500/10 border-blue-500/30'}`}>
             <div className={`text-xs font-semibold mb-1 ${metrics.isRawMaterialBottleneck ? 'text-orange-600' : 'text-blue-600'}`}>Incoming</div>
             <div className={`text-sm font-bold ${metrics.isRawMaterialBottleneck ? 'text-orange-600' : 'text-blue-600'}`}>
-              {rawMaterialUPH ? Math.round(rawMaterialUPH) : '∞'}
+              {rawMaterialUPH ? rawMaterialUPH.toFixed(1) : '∞'}
             </div>
             <div className={`text-[10px] ${metrics.isRawMaterialBottleneck ? 'text-orange-500' : 'text-blue-500'}`}>UPH</div>
             {metrics.isRawMaterialBottleneck && (
@@ -650,7 +737,7 @@ function WipFlowSimulation({
                     {operationNames[step.step] || step.stations[0]?.name || '-'}
                   </div>
                   <div className="text-sm font-bold mt-1">
-                    {Math.round(step.combinedRateUPH)}
+                    {step.combinedRateUPH.toFixed(1)}
                   </div>
                   <div className="text-[10px] text-muted-foreground">UPH</div>
                   {isBottleneck && (
@@ -686,7 +773,7 @@ function WipFlowSimulation({
           <div className="flex flex-col items-center min-w-[80px] p-2 rounded-lg border bg-green-500/10 border-green-500">
             <div className="text-xs font-semibold text-green-600 mb-1">Output</div>
             <div className="text-sm font-bold text-green-600">
-              {Math.round(metrics.systemThroughputUPH)}
+              {metrics.systemThroughputUPH.toFixed(1)}
             </div>
             <div className="text-[10px] text-green-500">UPH</div>
           </div>
@@ -790,11 +877,15 @@ export default function VsmBuilder() {
 
   async function saveNewVsm() {
     try {
+      // Compute metrics from stations
+      const metrics = newStations.length > 0 ? simulateVsm(newStations) : null;
       const payload = {
         name: createName,
         description: createDescription,
         status: createStatus,
         stationsJson: { stations: newStations },
+        bottleneckRate: metrics ? metrics.systemThroughputUPH / 3600 : null,
+        processEfficiency: metrics ? metrics.cellBalancePercent : null,
       };
       const created = await apiRequest('POST', '/api/vsm-configurations', payload);
       queryClient.invalidateQueries({ queryKey: ['/api/vsm-configurations', 'list'] });
@@ -948,11 +1039,17 @@ export default function VsmBuilder() {
   async function saveEditedVsm() {
     if (!vsm) return;
     try {
+      // Compute metrics from stations
+      const stationsToSave = editingStations || [];
+      const metricsConfig = rawMaterialUPH ? { rawMaterialUPH } : undefined;
+      const metrics = stationsToSave.length > 0 ? simulateVsm(stationsToSave, metricsConfig) : null;
       const payload = {
         name: editingName,
         description: editingDescription,
         status: editingStatus,
-        stationsJson: { stations: editingStations || [], rawMaterialUPH, operationNames },
+        stationsJson: { stations: stationsToSave, rawMaterialUPH, operationNames },
+        bottleneckRate: metrics ? metrics.systemThroughputUPH / 3600 : null,
+        processEfficiency: metrics ? metrics.cellBalancePercent : null,
       };
       await apiRequest('PUT', `/api/vsm-configurations/${vsm.id}`, payload);
       queryClient.invalidateQueries({ queryKey: ['/api/vsm-configurations', 'list'] });
@@ -1008,23 +1105,15 @@ export default function VsmBuilder() {
                       <Link href={`/vsm-builder?id=${v.id}`}>
                         <Button size="sm">Open</Button>
                       </Link>
-                      <Button size="sm" onClick={() => {
-                        // export markdown report
+                      <Button size="sm" onClick={async () => {
+                        // export markdown report to VSM Reports folder
                         try {
                           const stationsData = v.stationsJson as any;
                           const stations = Array.isArray(stationsData) ? stationsData : (stationsData?.stations || stationsData || []);
                           const rawUPH = stationsData?.rawMaterialUPH;
                           const opNames = stationsData?.operationNames || {};
-                          const md = exportVsmMarkdown(v.name, v.description, stations, rawUPH, opNames);
-                          const blob = new Blob([md], { type: 'text/markdown' });
-                          const url = URL.createObjectURL(blob);
-                          const a = document.createElement('a');
-                          a.href = url;
-                          a.download = `vsm-${v.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}.md`;
-                          document.body.appendChild(a);
-                          a.click();
-                          a.remove();
-                          URL.revokeObjectURL(url);
+                          const md = exportVsmMarkdown(v.name, v.description || '', stations, rawUPH, opNames);
+                          await exportVsmToFile(md, v.name);
                         } catch (err) {
                           alert('Export failed');
                         }
@@ -1086,6 +1175,8 @@ export default function VsmBuilder() {
             description: '',
             status: 'active',
             stationsJson: { stations: [] },
+            bottleneckRate: null,
+            processEfficiency: null,
           };
           const created = await apiRequest('POST', '/api/vsm-configurations', payload);
           queryClient.invalidateQueries({ queryKey: ['/api/vsm-configurations', 'list'] });
@@ -1207,18 +1298,10 @@ export default function VsmBuilder() {
                   <Button 
                     size="sm" 
                     variant="outline"
-                    onClick={() => {
+                    onClick={async () => {
                       try {
                         const md = exportVsmMarkdown(editingName, editingDescription, editingStations || [], rawMaterialUPH, operationNames);
-                        const blob = new Blob([md], { type: 'text/markdown' });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = `vsm-${editingName.replace(/[^a-z0-9]/gi, '-').toLowerCase()}.md`;
-                        document.body.appendChild(a);
-                        a.click();
-                        a.remove();
-                        URL.revokeObjectURL(url);
+                        await exportVsmToFile(md, editingName);
                       } catch (err) {
                         alert('Export failed');
                       }
@@ -1413,45 +1496,73 @@ export default function VsmBuilder() {
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 text-sm">
-                  <div className="p-3 bg-green-500/10 rounded border border-green-500/20">
+                  <div 
+                    className="p-3 bg-green-500/10 rounded border border-green-500/20 cursor-help"
+                    title={`System Throughput = Minimum rate across all operations\n= min(${editingMetrics.steps.map(s => s.combinedRateUPH.toFixed(1)).join(', ')}) UPH${editingMetrics.isRawMaterialConstrained ? `\n\nLimited by Raw Material: ${editingMetrics.rawMaterialUPH?.toFixed(1)} UPH` : ''}\n= ${editingMetrics.systemThroughputUPH.toFixed(1)} UPH`}
+                  >
                     <div className="text-xs text-muted-foreground">System Throughput</div>
-                    <div className="text-xl font-bold text-green-600">{Math.round(editingMetrics.systemThroughputUPH).toLocaleString()}</div>
+                    <div className="text-xl font-bold text-green-600">{editingMetrics.systemThroughputUPH.toFixed(1)}</div>
                     <div className="text-xs text-muted-foreground">UPH</div>
                     {editingMetrics.isRawMaterialConstrained && (
                       <div className="text-xs text-blue-600 mt-1">⚠ Limited by raw material</div>
                     )}
                   </div>
-                  <div className="p-3 bg-cyan-500/10 rounded border border-cyan-500/20">
+                  <div 
+                    className="p-3 bg-cyan-500/10 rounded border border-cyan-500/20 cursor-help"
+                    title={`Cell Balance = Value-Add Time / Lead Time × 100%\n= ${editingMetrics.valueAddTimeSec.toFixed(1)}s / ${editingMetrics.totalLeadTimeSec.toFixed(1)}s × 100%\n= ${editingMetrics.cellBalancePercent.toFixed(1)}%\n\nMeasures how balanced the line is.\n100% = perfectly balanced (no waiting)`}
+                  >
                     <div className="text-xs text-muted-foreground">Cell Balance</div>
                     <div className="text-xl font-bold text-cyan-600">{editingMetrics.cellBalancePercent.toFixed(1)}%</div>
                     <div className="text-xs text-muted-foreground">line efficiency</div>
                   </div>
-                  <div className="p-3 bg-indigo-500/10 rounded border border-indigo-500/20">
+                  <div 
+                    className="p-3 bg-indigo-500/10 rounded border border-indigo-500/20 cursor-help"
+                    title={`Avg Utilization = Average of (System Throughput / Op Capacity) × 100%\n= Average of [${editingMetrics.steps.map(s => s.avgUtilPercent.toFixed(0) + '%').join(', ')}]\n= ${editingMetrics.avgUtilizationPercent.toFixed(1)}%\n\nHow much of total capacity is being used.`}
+                  >
                     <div className="text-xs text-muted-foreground">Avg Utilization</div>
                     <div className="text-xl font-bold text-indigo-600">{editingMetrics.avgUtilizationPercent.toFixed(1)}%</div>
                     <div className="text-xs text-muted-foreground">capacity used</div>
                   </div>
-                  <div className="p-3 bg-purple-500/10 rounded border border-purple-500/20">
+                  <div 
+                    className="p-3 bg-purple-500/10 rounded border border-purple-500/20 cursor-help"
+                    title={`Lead Time = Value-Add Time + Waiting Time\n= ${editingMetrics.valueAddTimeSec.toFixed(1)}s + ${editingMetrics.totalWaitingTimeSec.toFixed(1)}s\n= ${editingMetrics.totalLeadTimeSec.toFixed(1)}s\n\nTotal time for one unit to flow through the system.`}
+                  >
                     <div className="text-xs text-muted-foreground">Lead Time</div>
                     <div className="text-xl font-bold text-purple-600">{editingMetrics.totalLeadTimeSec.toFixed(1)}s</div>
                     <div className="text-xs text-muted-foreground">{(editingMetrics.totalLeadTimeSec / 60).toFixed(2)} min</div>
                   </div>
-                  <div className="p-3 bg-amber-500/10 rounded border border-amber-500/20">
+                  <div 
+                    className="p-3 bg-amber-500/10 rounded border border-amber-500/20 cursor-help"
+                    title={`Value-Add Time = Sum of average cycle times\n= ${editingMetrics.steps.map(s => s.avgStationCT.toFixed(1) + 's').join(' + ')}\n= ${editingMetrics.valueAddTimeSec.toFixed(1)}s\n\nActual processing time (no waiting).`}
+                  >
                     <div className="text-xs text-muted-foreground">Value-Add Time</div>
                     <div className="text-xl font-bold text-amber-600">{editingMetrics.valueAddTimeSec.toFixed(1)}s</div>
                     <div className="text-xs text-muted-foreground">processing</div>
                   </div>
-                  <div className="p-3 bg-rose-500/10 rounded border border-rose-500/20">
+                  <div 
+                    className="p-3 bg-rose-500/10 rounded border border-rose-500/20 cursor-help"
+                    title={`Waiting Time = Sum of wait times at each operation\n= ${editingMetrics.steps.map(s => s.waitingTimeSec.toFixed(1) + 's').join(' + ')}\n= ${editingMetrics.totalWaitingTimeSec.toFixed(1)}s\n\nTime spent idle due to imbalanced operations.`}
+                  >
                     <div className="text-xs text-muted-foreground">Waiting Time</div>
                     <div className="text-xl font-bold text-rose-600">{editingMetrics.totalWaitingTimeSec.toFixed(1)}s</div>
                     <div className="text-xs text-muted-foreground">idle/starved</div>
                   </div>
-                  <div className="p-3 bg-blue-500/10 rounded border border-blue-500/20">
+                  <div 
+                    className="p-3 bg-blue-500/10 rounded border border-blue-500/20 cursor-help"
+                    title={`Total WIP = Sum of WIP buffers before each operation\n= ${editingMetrics.steps.map(s => s.wipBefore || 0).join(' + ')}\n= ${editingMetrics.totalWip} units\n\nPer Little's Law: Lead Time = WIP / Throughput`}
+                  >
                     <div className="text-xs text-muted-foreground">Total WIP</div>
                     <div className="text-xl font-bold text-blue-600">{editingMetrics.totalWip}</div>
                     <div className="text-xs text-muted-foreground">units in buffer</div>
                   </div>
-                  <div className="p-3 bg-orange-500/10 rounded border border-orange-500/20">
+                  <div 
+                    className="p-3 bg-orange-500/10 rounded border border-orange-500/20 cursor-help"
+                    title={editingMetrics.isRawMaterialBottleneck 
+                      ? `Bottleneck = Raw Material Supply\nIncoming rate (${editingMetrics.rawMaterialUPH?.toFixed(1)} UPH) is lower than all operations.\nIncrease raw material supply to improve throughput.`
+                      : editingMetrics.bottleneckStep 
+                        ? `Bottleneck = Op ${editingMetrics.bottleneckStep.step} (${editingMetrics.bottleneckStep.stations[0]?.name || 'Unknown'})\nRate: ${editingMetrics.bottleneckStep.combinedRateUPH.toFixed(1)} UPH\nMachines: ${editingMetrics.bottleneckStep.machines}\n\nThis operation limits system throughput.\nAdd machines or reduce cycle time here to improve.`
+                        : 'No bottleneck identified'}
+                  >
                     <div className="text-xs text-muted-foreground">Bottleneck</div>
                     <div className="text-xl font-bold text-orange-600">
                       {editingMetrics.isRawMaterialBottleneck 
@@ -1480,7 +1591,7 @@ export default function VsmBuilder() {
                           <tr className="border-b">
                             <th className="text-left py-2 px-2">Operation</th>
                             <th className="text-right py-2 px-2">Rate (UPH)</th>
-                            <th className="text-right py-2 px-2">CT (s)</th>
+                            <th className="text-right py-2 px-2" title="Effective Cycle Time = Time between units leaving this operation = 3600 / Combined UPH">Eff CT (s)</th>
                             <th className="text-right py-2 px-2">Utilization</th>
                             <th className="text-right py-2 px-2">Wait (s)</th>
                             <th className="text-right py-2 px-2">WIP</th>
@@ -1499,8 +1610,8 @@ export default function VsmBuilder() {
                                   Op {step.step}: {opDisplayName}
                                   {step.machines > 1 && <span className="text-muted-foreground"> ({step.machines}x)</span>}
                                 </td>
-                                <td className="text-right py-2 px-2">{Math.round(step.combinedRateUPH).toLocaleString()}</td>
-                                <td className="text-right py-2 px-2">{step.avgStationCT.toFixed(1)}</td>
+                                <td className="text-right py-2 px-2">{step.combinedRateUPH.toFixed(1)}</td>
+                                <td className="text-right py-2 px-2" title={`Eff CT = Time between units leaving this operation\n= 3600 / Combined UPH\n= 3600 / ${step.combinedRateUPH.toFixed(2)}\n= ${step.effectiveCTsec.toFixed(2)}s\n\nWith ${step.machines} parallel machine(s), effective CT is reduced.`}>{step.effectiveCTsec.toFixed(1)}</td>
                                 <td className={`text-right py-2 px-2 font-medium ${utilColor}`}>{step.avgUtilPercent.toFixed(1)}%</td>
                                 <td className="text-right py-2 px-2">{step.waitingTimeSec.toFixed(1)}</td>
                                 <td className="text-right py-2 px-2">{step.wipBefore || '-'}</td>
@@ -1509,7 +1620,9 @@ export default function VsmBuilder() {
                                     <Badge variant="outline" className="text-orange-600 border-orange-500 text-[10px]">Constraint</Badge>
                                   ) : step.avgUtilPercent < 70 ? (
                                     <Badge variant="outline" className="text-blue-600 border-blue-500 text-[10px]">Underutilized</Badge>
-                                  ) : null}
+                                  ) : (
+                                    <Badge variant="outline" className="text-green-600 border-green-500 text-[10px]">Balanced</Badge>
+                                  )}
                                 </td>
                               </tr>
                             );

@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MachineVSMCard } from "@/components/machine-vsm-card";
 import { MachineDialog, type MachineSubmitData } from "@/components/machine-dialog";
+import { simulateVsm, type VsmStation } from "@/lib/vsm-sim";
 import {
   Collapsible,
   CollapsibleContent,
@@ -42,11 +43,12 @@ import {
 } from "lucide-react";
 import type { Machine, MachineStatus, VsmConfiguration } from "@shared/schema";
 
-// Helper function to render stations from VSM config - only operation names
-function renderOperationNames(stationsJson: unknown) {
+// Helper function to compute VSM metrics from stationsJson
+function computeVsmMetrics(stationsJson: unknown): { throughputUPH: number; efficiencyPercent: number } | null {
   if (!stationsJson) return null;
+  
   // Handle both array format and nested { stations: [...] } format
-  let stations: Array<{name?: string; opName?: string; processStep?: number; machineId?: string; machineIdDisplay?: string}>;
+  let stations: VsmStation[];
   if (Array.isArray(stationsJson)) {
     stations = stationsJson;
   } else if (typeof stationsJson === 'object' && stationsJson !== null) {
@@ -55,29 +57,92 @@ function renderOperationNames(stationsJson: unknown) {
   } else {
     return null;
   }
+  
   if (!stations || stations.length === 0) return null;
   
-  // Group by process step to get unique operations
-  const stepNames = new Map<number, string>();
+  // Normalize stations to expected format
+  const normalizedStations: VsmStation[] = stations.map((s: any, idx: number) => ({
+    id: s.id || `s-${idx}`,
+    name: s.name || s.opName || `Op ${s.processStep || idx + 1}`,
+    processStep: s.processStep || 1,
+    machineId: s.machineId,
+    machineIdDisplay: s.machineIdDisplay,
+    cycleTime: s.cycleTime || s.ct || s.cycle_time || 60,
+    setupTime: s.setupTime || s.setup_time || 0,
+    batchSize: s.batchSize || s.batch_size || 1,
+    uptimePercent: s.uptimePercent || s.uptime_percent || 100,
+  }));
+  
+  try {
+    const rawMaterialUPH = (stationsJson as any)?.rawMaterialUPH;
+    const metrics = simulateVsm(normalizedStations, rawMaterialUPH ? { rawMaterialUPH } : undefined);
+    return {
+      throughputUPH: metrics.systemThroughputUPH,
+      efficiencyPercent: metrics.cellBalancePercent,
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+// Helper function to render stations from VSM config - only operation names
+function renderOperationNames(stationsJson: unknown) {
+  if (!stationsJson) return null;
+  // Handle both array format and nested { stations: [...] } format
+  let stations: Array<{name?: string; opName?: string; processStep?: number; machineId?: string; machineIdDisplay?: string}>;
+  let operationNames: Record<number, string> = {};
+  if (Array.isArray(stationsJson)) {
+    stations = stationsJson;
+  } else if (typeof stationsJson === 'object' && stationsJson !== null) {
+    const obj = stationsJson as any;
+    stations = obj.stations || obj.stationsJson || [];
+    operationNames = obj.operationNames || {};
+  } else {
+    return null;
+  }
+  if (!stations || stations.length === 0) return null;
+  
+  // Group by process step to get unique operations, count machines, and collect machine info
+  const stepData = new Map<number, { name: string; machines: Array<{ name: string; idSuffix: string }> }>();
   stations.forEach(station => {
     const step = station.processStep || 1;
-    if (!stepNames.has(step)) {
-      stepNames.set(step, station.name || station.opName || `Op ${step}`);
+    const machineName = station.name || station.opName || 'Machine';
+    const machineId = station.machineIdDisplay || station.machineId || '';
+    const idSuffix = machineId.slice(-3);
+    
+    if (!stepData.has(step)) {
+      // Use operationNames first, then fall back to station name
+      const displayName = operationNames[step] || station.name || station.opName || `Op ${step}`;
+      stepData.set(step, { name: displayName, machines: [{ name: machineName, idSuffix }] });
+    } else {
+      stepData.get(step)!.machines.push({ name: machineName, idSuffix });
     }
   });
   
-  const sortedSteps = Array.from(stepNames.entries()).sort((a, b) => a[0] - b[0]);
+  const sortedSteps = Array.from(stepData.entries()).sort((a, b) => a[0] - b[0]);
   
   return (
     <div className="flex flex-wrap items-center gap-1">
-      {sortedSteps.slice(0, 5).map(([step, name], idx) => (
-        <div key={step} className="flex items-center gap-1">
-          <span className="text-xs font-medium">{name}</span>
-          {idx < Math.min(sortedSteps.length, 5) - 1 && (
-            <ArrowRight className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-          )}
-        </div>
-      ))}
+      {sortedSteps.slice(0, 5).map(([step, data], idx) => {
+        const machineCount = data.machines.length;
+        const tooltipLines = [
+          `${machineCount} Machine${machineCount > 1 ? 's' : ''}`,
+          ...data.machines.map(m => m.idSuffix ? `${m.name} (...${m.idSuffix})` : m.name)
+        ];
+        return (
+          <div key={step} className="flex items-center gap-1">
+            <span 
+              className="text-xs font-medium cursor-default"
+              title={tooltipLines.join('\n')}
+            >
+              {data.name}
+            </span>
+            {idx < Math.min(sortedSteps.length, 5) - 1 && (
+              <ArrowRight className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+            )}
+          </div>
+        );
+      })}
       {sortedSteps.length > 5 && (
         <Badge variant="secondary" className="text-xs">
           +{sortedSteps.length - 5} more
@@ -332,21 +397,23 @@ export default function Dashboard() {
                   </CardHeader>
                   <Link href={`/vsm-builder?id=${vsm.id}`} className="cursor-pointer">
                     <CardContent className="space-y-3 pt-0">
-                      {/* Metrics */}
-                      <div className="grid grid-cols-2 gap-3">
-                        {vsm.bottleneckRate && (
-                          <div className="p-2 bg-muted/50 rounded">
-                            <div className="text-xs text-muted-foreground">Throughput</div>
-                            <div className="font-bold">{(vsm.bottleneckRate * 3600).toFixed(0)} UPH</div>
+                      {/* Metrics - computed from stationsJson */}
+                      {(() => {
+                        const metrics = computeVsmMetrics(vsm.stationsJson);
+                        if (!metrics) return null;
+                        return (
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="p-2 bg-muted/50 rounded">
+                              <div className="text-xs text-muted-foreground">Throughput</div>
+                              <div className="font-bold">{metrics.throughputUPH.toFixed(1)} UPH</div>
+                            </div>
+                            <div className="p-2 bg-muted/50 rounded">
+                              <div className="text-xs text-muted-foreground">Efficiency</div>
+                              <div className="font-bold text-green-600">{metrics.efficiencyPercent.toFixed(0)}%</div>
+                            </div>
                           </div>
-                        )}
-                        {vsm.processEfficiency && (
-                          <div className="p-2 bg-muted/50 rounded">
-                            <div className="text-xs text-muted-foreground">Efficiency</div>
-                            <div className="font-bold text-green-600">{vsm.processEfficiency.toFixed(0)}%</div>
-                          </div>
-                        )}
-                      </div>
+                        );
+                      })()}
                       
                       {/* Operation Names Flow */}
                       <div className="py-2 border-y">

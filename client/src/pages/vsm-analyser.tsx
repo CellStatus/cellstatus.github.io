@@ -10,8 +10,8 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { Skeleton } from '@/components/ui/skeleton';
-import { exportVsmText } from '@/lib/vsm-export';
-import { simulateVsm } from '@/lib/vsm-sim';
+import { exportVsmMarkdown } from '@/lib/vsm-export';
+import { simulateVsm, type VsmStation } from '@/lib/vsm-sim';
 
 type Machine = { id: string; name: string; machineId?: string; cell?: string };
 type Station = { 
@@ -369,20 +369,79 @@ export default function VsmAnalyser() {
 
   function exportVSM() {
     try {
-      const txt = exportVsmText(vsmName || 'VSM', vsmDescription, stations);
-      const blob = new Blob([txt], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `vsm-${Date.now()}.txt`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      // Get operation names from stationsJson if available
+      const operationNames: Record<number, string> = (vsmConfig?.stationsJson as any)?.operationNames || {};
+      const rawMaterialUPH: number | undefined = (vsmConfig?.stationsJson as any)?.rawMaterialUPH;
+      
+      // Convert stations to VsmStation format
+      const vsmStations: VsmStation[] = stations.map(s => ({
+        id: s.id,
+        name: s.name,
+        processStep: s.processStep,
+        machineId: s.machineId,
+        machineIdDisplay: s.machineIdDisplay,
+        cycleTime: s.cycleTime,
+        setupTime: s.setupTime,
+        batchSize: s.batchSize,
+        uptimePercent: s.uptimePercent,
+      }));
+      
+      // Generate markdown export
+      const markdown = exportVsmMarkdown(
+        vsmName || 'VSM',
+        vsmDescription,
+        vsmStations,
+        rawMaterialUPH,
+        operationNames
+      );
+      
+      // Create safe filename from VSM name
+      const safeName = (vsmName || 'VSM').replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '_');
+      const timestamp = new Date().toISOString().slice(0, 10);
+      const filename = `${safeName}_${timestamp}.md`;
+      
+      // Use File System Access API if available to save to Downloads/VSM Reports
+      if ('showSaveFilePicker' in window) {
+        (async () => {
+          try {
+            const handle = await (window as any).showSaveFilePicker({
+              suggestedName: filename,
+              startIn: 'downloads',
+              types: [{
+                description: 'Markdown Files',
+                accept: { 'text/markdown': ['.md'] },
+              }],
+            });
+            const writable = await handle.createWritable();
+            await writable.write(markdown);
+            await writable.close();
+          } catch (e: any) {
+            // User cancelled or API not fully supported, fall back to regular download
+            if (e.name !== 'AbortError') {
+              downloadFile(markdown, filename);
+            }
+          }
+        })();
+      } else {
+        // Fallback for browsers without File System Access API
+        downloadFile(markdown, filename);
+      }
     } catch (err) {
-      // fallback
       alert('Export failed');
     }
+  }
+
+  // Helper function to download file
+  function downloadFile(content: string, filename: string) {
+    const blob = new Blob([content], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   }
 
   // loadedStations is the current stations state (which will be initialized from vsmConfig when available)
@@ -426,15 +485,24 @@ export default function VsmAnalyser() {
           <CardContent>
             <div className="grid gap-3">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div className="p-3 bg-muted/50 rounded">
+                <div 
+                  className="p-3 bg-muted/50 rounded cursor-help"
+                  title={`System Throughput = Minimum rate across all operations\n= min(${analysis.steps.map(s => s.combinedRateUPH.toFixed(1)).join(', ')}) UPH\n= ${analysis.systemThroughputUPH.toFixed(1)} UPH`}
+                >
                   <div className="text-xs text-muted-foreground">System Throughput</div>
-                  <div className="text-2xl font-bold">{Math.round(analysis.systemThroughputUPH)} UPH</div>
+                  <div className="text-2xl font-bold">{analysis.systemThroughputUPH.toFixed(1)} UPH</div>
                 </div>
-                <div className="p-3 bg-muted/50 rounded">
+                <div 
+                  className="p-3 bg-muted/50 rounded cursor-help"
+                  title={`Lead Time = Value-Add Time + Waiting Time\n= ${analysis.valueAddTimeSec.toFixed(1)}s + ${analysis.totalWaitingTimeSec.toFixed(1)}s\n= ${analysis.totalLeadTimeSec.toFixed(1)}s\n\nTotal time for one unit to flow through.`}
+                >
                   <div className="text-xs text-muted-foreground">Total Lead Time</div>
                   <div className="text-2xl font-bold">{analysis.totalLeadTimeSec.toFixed(1)} sec</div>
                 </div>
-                <div className="p-3 bg-muted/50 rounded">
+                <div 
+                  className="p-3 bg-muted/50 rounded cursor-help"
+                  title={`Process Efficiency = Value-Add Time / Lead Time × 100%\n= ${analysis.valueAddTimeSec.toFixed(1)}s / ${analysis.totalLeadTimeSec.toFixed(1)}s × 100%\n= ${analysis.processEfficiencyPercent.toFixed(1)}%\n\nMeasures how balanced the line is.`}
+                >
                   <div className="text-xs text-muted-foreground">Process Efficiency</div>
                   <div className="text-2xl font-bold">{analysis.processEfficiencyPercent.toFixed(0)}%</div>
                 </div>
@@ -447,12 +515,22 @@ export default function VsmAnalyser() {
                       <div className="flex items-center justify-between">
                         <div>
                           <div className="text-sm font-medium">Op {step.step} — {step.stations.map(s=>s.name).join(', ')}</div>
-                          <div className="text-xs text-muted-foreground">{step.machines} machines • Eff CT: {step.effectiveCTsec.toFixed(1)}s</div>
+                          <div 
+                            className="text-xs text-muted-foreground cursor-help"
+                            title={`Eff CT = 3600 / Combined UPH\n= 3600 / ${step.combinedRateUPH.toFixed(2)}\n= ${step.effectiveCTsec.toFixed(2)}s\n\nWith ${step.machines} parallel machine(s), effective CT is reduced.`}
+                          >
+                            {step.machines} machines • Eff CT: {step.effectiveCTsec.toFixed(1)}s
+                          </div>
                         </div>
                         <div className="text-right">
-                          <div className="text-sm">Comb Rate: <span className="font-bold">{Math.round(step.combinedRateUPH)} UPH</span></div>
-                          <div className="text-xs">Per Machine (Avg): {Math.round((analysis.systemThroughputUPH / Math.max(1, step.machines)))} UPH</div>
-                          <div className="text-xs">Util: {Math.round(step.avgUtilPercent)}%</div>
+                          <div className="text-sm">Comb Rate: <span className="font-bold">{step.combinedRateUPH.toFixed(1)} UPH</span></div>
+                          <div className="text-xs">Per Machine (Avg): {(analysis.systemThroughputUPH / Math.max(1, step.machines)).toFixed(1)} UPH</div>
+                          <div 
+                            className="text-xs cursor-help"
+                            title={`Utilization = System Throughput / Op Capacity × 100%\n= ${analysis.systemThroughputUPH.toFixed(2)} / ${step.combinedRateUPH.toFixed(2)} × 100%\n= ${step.avgUtilPercent.toFixed(1)}%`}
+                          >
+                            Util: {step.avgUtilPercent.toFixed(1)}%
+                          </div>
                         </div>
                       </div>
                     </CardContent>
@@ -464,7 +542,7 @@ export default function VsmAnalyser() {
                 <h4 className="font-semibold">Key Insights</h4>
                 <ul className="list-disc pl-5 text-sm">
                   {analysis.bottleneckStep && (
-                    <li>Op {analysis.bottleneckStep.step} is your constraint - limiting output to {Math.round(analysis.systemThroughputUPH)} UPH</li>
+                    <li>Op {analysis.bottleneckStep.step} is your constraint - limiting output to {analysis.systemThroughputUPH.toFixed(1)} UPH</li>
                   )}
                   <li>To increase throughput: add parallel machines at the bottleneck or reduce individual cycle times.</li>
                 </ul>
