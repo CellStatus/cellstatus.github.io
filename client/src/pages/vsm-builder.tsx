@@ -773,8 +773,21 @@ function WipFlowSimulation({
           <div className="flex flex-col items-center min-w-[80px] p-2 rounded-lg border bg-green-500/10 border-green-500">
             <div className="text-xs font-semibold text-green-600 mb-1">Output</div>
             <div className="text-sm font-bold text-green-600">
-              {metrics.systemThroughputUPH.toFixed(1)}
-            </div>
+                {(() => {
+                  if (!metrics?.steps) return '-';
+                  // find closest upstream op (from end) that has WIP
+                  for (let i = metrics.steps.length - 1; i >= 0; i--) {
+                    const w = wipState[i] || 0;
+                    if (w > 0) return metrics.steps[i].combinedRateUPH.toFixed(1);
+                  }
+                  // no WIP anywhere: if incoming is undefined/null => infinite supply -> match first op
+                  if (rawMaterialUPH === undefined || rawMaterialUPH === null) {
+                    return metrics.steps[0]?.combinedRateUPH.toFixed(1) || '0.0';
+                  }
+                  // finite incoming UPH (including 0) -> use that as output
+                  return (rawMaterialUPH || 0).toFixed(1);
+                })()}
+              </div>
             <div className="text-[10px] text-green-500">UPH</div>
           </div>
         </div>
