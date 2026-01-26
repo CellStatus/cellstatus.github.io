@@ -233,6 +233,8 @@ function VisualProcessFlow({
   metrics?.steps.forEach(s => {
     wipByStep.set(s.step, s.wipBefore);
   });
+  // Compute WIP before first operation (to display inventory under the initial arrow)
+  const wipBeforeFirst = stepGroups.length > 0 ? stepGroups[0][1].reduce((sum, s) => sum + (s.wipBefore || 0), 0) : 0;
   
   // Get operation names for each step
   const opNamesByStep = new Map<number, string[]>();
@@ -287,8 +289,17 @@ function VisualProcessFlow({
           )}
         </div>
         
-        <div className="flex items-center">
+        <div className="flex flex-col items-center justify-center min-w-[80px]">
           <ArrowRight className="h-5 w-5 text-muted-foreground" />
+          {wipBeforeFirst > 0 && (
+            <div className="mt-1 flex flex-col items-center" title={`WIP Inventory: ${wipBeforeFirst} units before first operation`}>
+              <svg width="48" height="42" viewBox="0 0 48 42" className="text-amber-500">
+                <polygon points="24,2 46,40 2,40" fill="none" stroke="currentColor" strokeWidth="2" />
+                <text x="24" y="32" textAnchor="middle" fontSize="12" fill="currentColor" fontWeight="bold">{wipBeforeFirst}</text>
+              </svg>
+              <span className="text-[10px] text-amber-600 font-medium">I</span>
+            </div>
+          )}
         </div>
         {stepGroups.map(([step, stationsInStep], groupIdx) => {
           const stepMetric = metrics?.steps.find(s => s.step === step);
@@ -305,23 +316,6 @@ function VisualProcessFlow({
           
           return (
             <React.Fragment key={step}>
-              {/* Show inventory triangle before first operation if it has WIP */}
-              {groupIdx === 0 && wipBeforeThisStep > 0 && (
-                <>
-                  <div className="flex flex-col items-center justify-center min-w-[80px]">
-                    <div className="flex flex-col items-center" title={`WIP Inventory: ${wipBeforeThisStep} units before first operation`}>
-                      <svg width="48" height="42" viewBox="0 0 48 42" className="text-amber-500">
-                        <polygon points="24,2 46,40 2,40" fill="none" stroke="currentColor" strokeWidth="2" />
-                        <text x="24" y="32" textAnchor="middle" fontSize="12" fill="currentColor" fontWeight="bold">{wipBeforeThisStep}</text>
-                      </svg>
-                      <span className="text-[10px] text-amber-600 font-medium">I</span>
-                    </div>
-                  </div>
-                  <div className="flex items-center">
-                    <ArrowRight className="h-5 w-5 text-muted-foreground" />
-                  </div>
-                </>
-              )}
               <div 
                 className={`flex flex-col gap-2 min-w-[200px] p-3 rounded-lg border cursor-pointer transition-all hover:border-primary/50 ${selectedStep === step ? 'bg-primary/10 border-primary ring-2 ring-primary' : isBottleneck ? 'bg-orange-500/10 border-orange-500' : 'bg-muted/30'}`}
                 onClick={() => setSelectedStep(selectedStep === step ? null : step)}
@@ -529,22 +523,45 @@ function WipFlowSimulation({
   metrics,
   rawMaterialUPH,
   operationNames,
+  setMetrics,
+  setEditingStations,
 }: { 
   metrics?: VsmDetailedMetrics | null;
   rawMaterialUPH?: number;
   operationNames: Record<number, string>;
+  setMetrics?: React.Dispatch<React.SetStateAction<VsmDetailedMetrics | null>>;
+  setEditingStations?: React.Dispatch<React.SetStateAction<VsmStation[] | null>>;
 }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [simulationTime, setSimulationTime] = useState(0);
   const [speed, setSpeed] = useState(1); // 1x, 2x, 5x, 10x
   const [wipState, setWipState] = useState<number[]>([]);
   const [processedCounts, setProcessedCounts] = useState<number[]>([]);
+  const [processedTotal, setProcessedTotal] = useState<number>(0);
+  const [editingWipIdx, setEditingWipIdx] = useState<number | null>(null);
+  const [editingWipValue, setEditingWipValue] = useState<string>('');
   
-  // Initialize WIP state based on metrics
+  // Initialize WIP state based on metrics, but only reset when configured WIP values change
+  const prevConfiguredWipsRef = React.useRef<number[] | null>(null);
   useEffect(() => {
-    if (metrics?.steps) {
-      setWipState(metrics.steps.map(s => s.wipBefore || 0));
+    if (!metrics?.steps) return;
+    const configured = metrics.steps.map(s => s.wipBefore || 0);
+    const prevConfigured = prevConfiguredWipsRef.current;
+    // update ref for next comparison
+    prevConfiguredWipsRef.current = configured;
+
+    if (prevConfigured === null) {
+      // first load: initialize wip and processed counts
+      setWipState(configured);
       setProcessedCounts(metrics.steps.map(() => 0));
+      return;
+    }
+
+    // determine if any configured WIP values changed
+    const configChanged = configured.length !== prevConfigured.length || configured.some((v, i) => v !== prevConfigured[i]);
+    if (configChanged) {
+      // only reset WIP when the configured WIP quantities changed
+      setWipState(configured);
     }
   }, [metrics?.steps]);
   
@@ -554,35 +571,42 @@ function WipFlowSimulation({
     
     const interval = setInterval(() => {
       setSimulationTime(prev => prev + 0.1 * speed);
-      
+
       setWipState(prevWip => {
         const newWip = [...prevWip];
         const steps = metrics.steps;
-        
+        let finishedThisTick = 0;
+
         // Calculate arrivals and departures based on rates
-        // Incoming rate
         const incomingRate = rawMaterialUPH || metrics.systemThroughputUPH;
         const incomingPerTick = (incomingRate / 3600) * 0.1 * speed;
-        
+
         // Add incoming to first operation's WIP
         if (newWip.length > 0) {
           newWip[0] += incomingPerTick;
         }
-        
+
         // Process through each operation
         for (let i = 0; i < steps.length; i++) {
           const step = steps[i];
           const processRate = step.combinedRateUPH / 3600; // units per second
           const canProcess = Math.min(newWip[i], processRate * 0.1 * speed);
-          
+
           newWip[i] -= canProcess;
-          
+
           // Add to next operation's WIP (or count as finished)
           if (i < steps.length - 1) {
             newWip[i + 1] += canProcess;
+          } else {
+            finishedThisTick += canProcess;
           }
         }
-        
+
+        // update processed total immediately (within updater to avoid race)
+        if (finishedThisTick > 0) {
+          setProcessedTotal(prev => prev + finishedThisTick);
+        }
+
         // Clamp to reasonable values (max 10000 for display purposes)
         return newWip.map(w => Math.max(0, Math.min(w, 10000)));
       });
@@ -596,6 +620,7 @@ function WipFlowSimulation({
     if (metrics?.steps) {
       setWipState(metrics.steps.map(s => s.wipBefore || 0));
       setProcessedCounts(metrics.steps.map(() => 0));
+      setProcessedTotal(0);
     }
     setIsPlaying(false);
   };
@@ -638,10 +663,13 @@ function WipFlowSimulation({
             <Badge variant="outline" className="text-xs">
               {(() => {
                 const totalSec = Math.floor(simulationTime);
-                const hours = Math.floor(totalSec / 3600);
+                const days = Math.floor(totalSec / 86400);
+                const hours = Math.floor((totalSec % 86400) / 3600);
                 const minutes = Math.floor((totalSec % 3600) / 60);
                 const seconds = totalSec % 60;
-                if (hours > 0) {
+                if (days > 0) {
+                  return `${days}d ${hours}h ${minutes}m ${seconds}s`;
+                } else if (hours > 0) {
                   return `${hours}h ${minutes}m ${seconds}s`;
                 } else if (minutes > 0) {
                   return `${minutes}m ${seconds}s`;
@@ -666,13 +694,11 @@ function WipFlowSimulation({
               value={speed}
               onChange={(e) => setSpeed(Number(e.target.value))}
             >
-              <option value={1}>1x</option>
-              <option value={2}>2x</option>
-              <option value={5}>5x</option>
-              <option value={10}>10x</option>
-              <option value={100}>100x</option>
-              <option value={500}>500x</option>
-              <option value={1000}>1000x</option>
+              <option value={1}>Real time</option>
+              <option value={60}>1m/s</option>
+              <option value={1800}>30m/s</option>
+              <option value={3600}>1h/s</option>
+              <option value={86400}>1d/s</option>
             </select>
           </div>
         </div>
@@ -691,7 +717,7 @@ function WipFlowSimulation({
             )}
           </div>
           
-          <div className="flex items-center">
+            <div className="flex items-center">
             <ArrowRight className="h-5 w-5 text-muted-foreground animate-pulse" />
           </div>
           
@@ -705,11 +731,65 @@ function WipFlowSimulation({
                 {/* WIP Basket before operation */}
                 <div className="flex flex-col items-center min-w-[80px]">
                   <div className="text-[10px] text-muted-foreground mb-1">WIP Buffer</div>
-                  <div className={`text-sm font-bold ${wip > 10 ? 'text-amber-600' : 'text-foreground'}`}>
-                    {Math.round(wip)} units
-                  </div>
-                  {/* Basket SVG */}
-                  <svg width="90" height="90" viewBox="0 0 90 90" className="mt-1">
+                        <div className={`text-sm font-bold ${wip > 0 ? 'text-amber-600' : 'text-foreground'}`}>
+                                  {editingWipIdx === idx ? (
+                                    <Input
+                                      inputMode="numeric"
+                                      value={editingWipValue}
+                                      onChange={(e) => setEditingWipValue(e.target.value)}
+                                      onBlur={() => {
+                                        const parsed = Number(editingWipValue);
+                                        const val = Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
+                                        setWipState(prev => {
+                                          const next = [...prev];
+                                          next[idx] = val;
+                                          return next;
+                                        });
+                                        if (setMetrics && metrics) {
+                                          const newMetrics: VsmDetailedMetrics = {
+                                            ...metrics,
+                                            steps: metrics.steps.map((s, i) => i === idx ? { ...s, wipBefore: val } : s),
+                                          };
+                                          setMetrics(newMetrics);
+                                        }
+                                        // Persist into editingStations so save will include this WIP
+                                        if (setEditingStations && metrics) {
+                                          const stepNumber = metrics.steps[idx]?.step;
+                                          setEditingStations(prev => {
+                                            if (!prev) return prev;
+                                            const arr = [...prev];
+                                            // find first station with matching processStep and update its wipBefore
+                                            const targetIdx = arr.findIndex(s => s.processStep === stepNumber);
+                                            if (targetIdx >= 0) {
+                                              arr[targetIdx] = { ...arr[targetIdx], wipBefore: val };
+                                            }
+                                            return arr;
+                                          });
+                                        }
+                                        setEditingWipIdx(null);
+                                      }}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                                        if (e.key === 'Escape') setEditingWipIdx(null);
+                                      }}
+                                      className="h-7 w-20 text-center text-sm font-bold"
+                                      autoFocus
+                                    />
+                                  ) : (
+                                    <div
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setEditingWipIdx(idx);
+                                        setEditingWipValue(Math.round(wip).toString());
+                                      }}
+                                      className="cursor-pointer"
+                                    >
+                                      {Math.round(wip)} units
+                                    </div>
+                                  )}
+                                </div>
+                          {/* Basket SVG */}
+                                <svg width="90" height="90" viewBox="0 0 90 90" className="mt-1" onClick={(e) => { e.stopPropagation(); }}>
                     {/* Basket outline */}
                     <path 
                       d="M5 10 L5 85 L85 85 L85 10" 
@@ -788,7 +868,14 @@ function WipFlowSimulation({
                   return (rawMaterialUPH || 0).toFixed(1);
                 })()}
               </div>
-            <div className="text-[10px] text-green-500">UPH</div>
+            <div className="text-[10px] text-green-500 mb-2">UPH</div>
+            <div className="flex flex-col gap-1 w-full items-center">
+              <div className="text-sm font-bold">{Math.round(processedTotal)}</div>
+              <div className="text-[10px] text-muted-foreground">Produced</div>
+              <div className="h-1" />
+              <div className="text-sm font-bold">{(simulationTime > 0 ? (processedTotal / simulationTime * 3600).toFixed(1) : '0.0')}</div>
+              <div className="text-[10px] text-muted-foreground">Avg UPH</div>
+            </div>
           </div>
         </div>
         
@@ -1573,7 +1660,7 @@ export default function VsmBuilder() {
                     title={editingMetrics.isRawMaterialBottleneck 
                       ? `Bottleneck = Raw Material Supply\nIncoming rate (${editingMetrics.rawMaterialUPH?.toFixed(1)} UPH) is lower than all operations.\nIncrease raw material supply to improve throughput.`
                       : editingMetrics.bottleneckStep 
-                        ? `Bottleneck = Op ${editingMetrics.bottleneckStep.step} (${editingMetrics.bottleneckStep.stations[0]?.name || 'Unknown'})\nRate: ${editingMetrics.bottleneckStep.combinedRateUPH.toFixed(1)} UPH\nMachines: ${editingMetrics.bottleneckStep.machines}\n\nThis operation limits system throughput.\nAdd machines or reduce cycle time here to improve.`
+                        ? `Bottleneck = Op ${editingMetrics.bottleneckStep.step} (${operationNames?.[editingMetrics.bottleneckStep.step] || editingMetrics.bottleneckStep.stations[0]?.name || 'Unknown'})\nRate: ${editingMetrics.bottleneckStep.combinedRateUPH.toFixed(1)} UPH\nMachines: ${editingMetrics.bottleneckStep.machines}\n\nThis operation limits system throughput.\nAdd machines or reduce cycle time here to improve.`
                         : 'No bottleneck identified'}
                   >
                     <div className="text-xs text-muted-foreground">Bottleneck</div>
@@ -1587,8 +1674,8 @@ export default function VsmBuilder() {
                     {editingMetrics.isRawMaterialBottleneck ? (
                       <div className="text-xs text-muted-foreground">Incoming rate limiting</div>
                     ) : editingMetrics.bottleneckStep && (
-                      <div className="text-xs text-muted-foreground truncate" title={editingMetrics.bottleneckStep.stations[0]?.name}>
-                        {editingMetrics.bottleneckStep.stations[0]?.name || 'Unknown'}
+                      <div className="text-xs text-muted-foreground truncate" title={operationNames?.[editingMetrics.bottleneckStep.step] || editingMetrics.bottleneckStep.stations[0]?.name}>
+                        {operationNames?.[editingMetrics.bottleneckStep.step] || editingMetrics.bottleneckStep.stations[0]?.name || 'Unknown'}
                       </div>
                     )}
                   </div>
@@ -1676,6 +1763,8 @@ export default function VsmBuilder() {
               metrics={editingMetrics}
               rawMaterialUPH={rawMaterialUPH}
               operationNames={operationNames}
+              setMetrics={setEditingMetrics}
+              setEditingStations={setEditingStations}
             />
           )}
 
