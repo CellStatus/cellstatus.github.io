@@ -15,6 +15,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { apiRequest, queryClient } from '@/lib/queryClient';
 import { useToast } from '@/hooks/use-toast';
 import type { Machine, VsmConfiguration } from '@shared/schema';
+import { toPng } from 'html-to-image';
+import { PDFDocument, rgb } from 'pdf-lib';
 
 interface Station {
   id: string;
@@ -802,6 +804,191 @@ END OF REPORT
     URL.revokeObjectURL(url);
   };
 
+  // Reference to the rendered process flow (used for exporting diagram image)
+  const processFlowRef = useRef<HTMLDivElement | null>(null);
+
+  // Reusable snapshot generator (extracted from export routine)
+  const computeSnapshots = () => {
+    const sortedSteps = [...stepMetrics].sort((a, b) => a.stepNumber - b.stepNumber);
+
+    const inputRatePerSecond = supplyRateUPH ? (supplyRateUPH / 3600) : ((sortedSteps[0]?.combinedRate) || 0);
+
+    const simSteps = sortedSteps;
+    const simWip: { [key: number]: number } = { 0: 0 };
+    simSteps.forEach(step => {
+      const entry = (wipInventory || []).find(w => w.afterOpNumber === step.stepNumber);
+      simWip[step.stepNumber] = entry ? (entry.quantity || 0) : 0;
+    });
+
+    const snapshots: { time: number; wip: { [key: number]: number }; exited: number; totalWip: number }[] = [];
+    let totalExited = 0;
+
+    const captureByCompleted = !!(simTargetCompleted && simTargetCompleted > 0);
+    let milestones: number[] = [];
+    if (captureByCompleted) {
+      const target = Math.max(0, Math.floor(simTargetCompleted || 0));
+      const setM = new Set<number>([0, Math.floor(target * 0.10), Math.floor(target * 0.25), Math.floor(target * 0.5), Math.floor(target * 0.75), target]);
+      milestones = Array.from(setM).sort((a, b) => a - b);
+    }
+
+    let maxSimSeconds = 300;
+    if (captureByCompleted && bottleneckRate > 0) {
+      const secondsNeeded = Math.ceil((simTargetCompleted || 0) / Math.max(1e-9, bottleneckRate));
+      maxSimSeconds = Math.min(Math.max(300, secondsNeeded * 2), 1000000);
+    }
+
+    let nextMilestoneIdx = 0;
+
+    const initialWipSum = Object.entries(simWip).filter(([k]) => parseInt(k) > 0).reduce((s, [, v]) => s + v, 0);
+    snapshots.push({ time: 0, wip: { ...simWip }, exited: 0, totalWip: initialWipSum });
+
+    for (let t = 1; t <= maxSimSeconds; t++) {
+      simWip[0] = (simWip[0] || 0) + inputRatePerSecond;
+
+      simSteps.forEach((step, idx) => {
+        const upstreamBuffer = idx === 0 ? 0 : simSteps[idx - 1].stepNumber;
+        const currentBuffer = step.stepNumber;
+        const unitsPerSecond = step.combinedRate;
+        const canProcess = Math.min(simWip[upstreamBuffer] || 0, unitsPerSecond);
+
+        if (canProcess > 0) {
+          simWip[upstreamBuffer] = Math.max(0, (simWip[upstreamBuffer] || 0) - canProcess);
+          simWip[currentBuffer] = (simWip[currentBuffer] || 0) + canProcess;
+        }
+      });
+
+      const lastStep = simSteps[simSteps.length - 1];
+      if (lastStep) {
+        const exitRate = lastStep.combinedRate;
+        const exiting = Math.min(simWip[lastStep.stepNumber] || 0, exitRate);
+        simWip[lastStep.stepNumber] = Math.max(0, (simWip[lastStep.stepNumber] || 0) - exiting);
+        totalExited += exiting;
+      }
+
+      const wipSum = Object.entries(simWip).filter(([key]) => parseInt(key) > 0).reduce((sum, [, val]) => sum + val, 0);
+
+      if (captureByCompleted) {
+        while (nextMilestoneIdx < milestones.length && totalExited >= milestones[nextMilestoneIdx]) {
+          snapshots.push({ time: t, wip: { ...simWip }, exited: totalExited, totalWip: wipSum });
+          nextMilestoneIdx++;
+        }
+        if (nextMilestoneIdx >= milestones.length) break;
+      } else {
+        if (t === 30 || t === 60 || t === 120 || t === 180 || t === 300) {
+          snapshots.push({ time: t, wip: { ...simWip }, exited: totalExited, totalWip: wipSum });
+        }
+      }
+    }
+
+    return { snapshots, simSteps };
+  };
+
+  // Simple chart drawer: draws a small line chart for snapshots and returns a data URL
+  const drawChartDataUrl = (snapshots: any[], width = 800, height = 300, labels = { x: 'Completed', y: 'WIP' }) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d')!;
+    // Background
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+    // Padding
+    const pad = 40;
+    // Compute ranges
+    const xs = snapshots.map(s => s.exited);
+    const ys = snapshots.map(s => s.totalWip);
+    const xMin = Math.min(...xs);
+    const xMax = Math.max(...xs) || 1;
+    const yMin = 0;
+    const yMax = Math.max(...ys, 1);
+    // Axes
+    ctx.strokeStyle = '#666';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(pad, pad);
+    ctx.lineTo(pad, height - pad);
+    ctx.lineTo(width - pad, height - pad);
+    ctx.stroke();
+    // Labels
+    ctx.fillStyle = '#333';
+    ctx.font = '14px sans-serif';
+    ctx.fillText(labels.x, width / 2 - 20, height - 8);
+    ctx.save();
+    ctx.translate(12, height / 2 + 20);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText(labels.y, 0, 0);
+    ctx.restore();
+    // Plot line
+    ctx.strokeStyle = '#0077cc';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    snapshots.forEach((s, i) => {
+      const x = pad + ((s.exited - xMin) / (xMax - xMin)) * (width - pad * 2 || 1);
+      const y = height - pad - ((s.totalWip - yMin) / (yMax - yMin)) * (height - pad * 2 || 1);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+      // points
+      ctx.fillStyle = '#004a7f';
+      ctx.beginPath();
+      ctx.arc(x, y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.stroke();
+    return canvas.toDataURL('image/png');
+  };
+
+  // Export the process flow and simple simulation charts to a multi-page PDF
+  const exportPdf = async () => {
+    if (!processFlowRef.current) {
+      alert('Process flow not available to export');
+      return;
+    }
+
+    try {
+      const flowDataUrl = await toPng(processFlowRef.current, { backgroundColor: '#ffffff', pixelRatio: 2 });
+      const { snapshots } = computeSnapshots();
+      const chart1 = drawChartDataUrl(snapshots, 1000, 360, { x: 'Completed Units', y: 'Total WIP' });
+
+      const pdfDoc = await PDFDocument.create();
+
+      // Add diagram page
+      const flowResp = await fetch(flowDataUrl);
+      const flowArrayBuf = await flowResp.arrayBuffer();
+      const flowImage = await pdfDoc.embedPng(new Uint8Array(flowArrayBuf));
+      const page1 = pdfDoc.addPage([flowImage.width, flowImage.height]);
+      page1.drawImage(flowImage, { x: 0, y: 0, width: flowImage.width, height: flowImage.height });
+
+      // Add chart page
+      const chartResp = await fetch(chart1);
+      const chartBuf = await chartResp.arrayBuffer();
+      const chartImage = await pdfDoc.embedPng(new Uint8Array(chartBuf));
+      const page2 = pdfDoc.addPage([chartImage.width, chartImage.height]);
+      page2.drawImage(chartImage, { x: 0, y: 0, width: chartImage.width, height: chartImage.height });
+
+      // Add summary page with text
+      const page3 = pdfDoc.addPage([595, 842]); // A4-ish
+      const fontSize = 11;
+      page3.drawText(`VSM: ${vsmName || 'Untitled'}`, { x: 40, y: 780, size: 14, color: rgb(0, 0, 0) });
+      page3.drawText(`Generated: ${new Date().toLocaleString()}`, { x: 40, y: 760, size: fontSize });
+      page3.drawText(`System Throughput: ${(bottleneckRate * 3600).toFixed(0)} UPH`, { x: 40, y: 740, size: fontSize });
+      page3.drawText(`Total WIP: ${(wipInventory || []).reduce((s, w) => s + (w.quantity || 0), 0).toFixed(0)} units`, { x: 40, y: 720, size: fontSize });
+
+      const pdfBytes = await pdfDoc.save();
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `VSM_Report_${(new Date()).toISOString().slice(0,10)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Export PDF failed', err);
+      alert('Failed to export PDF. See console for details.');
+    }
+  };
+
   const { metrics, stepMetrics, bottleneckRate, bottleneckIndex, bottleneckStepIndex } = calculateMetrics();
 
   const handleNewVsm = () => {
@@ -876,6 +1063,16 @@ END OF REPORT
             >
               <Download className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
               Export
+            </Button>
+            <Button
+              onClick={exportPdf}
+              disabled={metrics.length === 0}
+              variant="outline"
+              size="sm"
+              className="text-xs sm:text-sm"
+            >
+              <Download className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+              Export PDF
             </Button>
             <Button
               onClick={reset}
@@ -1445,7 +1642,7 @@ END OF REPORT
             <div className="space-y-4 sm:space-y-6">
               {/* Process Flow - Step-based visualization with parallel machine support */}
               <div className="overflow-x-auto overflow-y-visible pb-4 pt-2 sm:pt-4">
-                <div className="flex items-start gap-2 sm:gap-3 mx-auto" style={{ 
+                <div ref={processFlowRef} className="flex items-start gap-2 sm:gap-3 mx-auto" style={{ 
                   width: 'fit-content',
                   maxWidth: '100%',
                   minHeight: '320px'
