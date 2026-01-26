@@ -18,11 +18,11 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
-export async function apiRequest(
+export async function apiRequest<T = any>(
   method: string,
   url: string,
   data?: unknown | undefined,
-): Promise<Response> {
+): Promise<T> {
   // Simple retry with backoff for transient errors (e.g., 429 rate limit)
   const maxAttempts = 3;
   let attempt = 0;
@@ -37,19 +37,27 @@ export async function apiRequest(
     });
 
     if (res.ok) {
-      return res;
+      try {
+        return await res.json() as unknown as T;
+      } catch (e) {
+        // not JSON, return raw text
+        const txt = await res.text();
+        return txt as unknown as T;
+      }
     }
 
-    const isRateLimit = res.status === 429;
-    const isServerError = res.status >= 500;
-    const shouldRetry = isRateLimit || isServerError;
+    if (!res.ok) {
+      const isRateLimit = res.status === 429;
+      const isServerError = res.status >= 500;
+      const shouldRetry = isRateLimit || isServerError;
 
-    const text = (await res.text()) || res.statusText;
-    lastError = new Error(`${res.status}: ${text}`);
+      const text = (await res.text()) || res.statusText;
+      lastError = new Error(`${res.status}: ${text}`);
 
-    if (!shouldRetry) {
-      // Non-retryable error
-      throw lastError;
+      if (!shouldRetry) {
+        // Non-retryable error
+        throw lastError;
+      }
     }
 
     attempt += 1;
@@ -59,6 +67,17 @@ export async function apiRequest(
 
   if (lastError) throw lastError;
   throw new Error("Request failed");
+}
+
+// Note: previously apiRequest returned the raw Response. Now it returns parsed JSON.
+export async function apiRequestJson<T = any>(
+  method: string,
+  url: string,
+  data?: unknown,
+): Promise<T> {
+  const res = await apiRequest(method, url, data as any);
+  // if the implementation already returned parsed JSON, just cast
+  return res as unknown as T;
 }
 
 type UnauthorizedBehavior = "returnNull" | "throw";

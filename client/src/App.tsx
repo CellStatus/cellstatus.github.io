@@ -8,7 +8,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
 import Dashboard from "@/pages/dashboard-vsm";
 import Machines from "@/pages/machines";
-import VSMBuilder from "@/pages/vsm-analyser";
+import VSMBuilder from "@/pages/vsm-builder";
 import NotFound from "@/pages/not-found";
 
 function AppContent() {

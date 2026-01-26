@@ -42,25 +42,45 @@ import {
 } from "lucide-react";
 import type { Machine, MachineStatus, VsmConfiguration } from "@shared/schema";
 
-// Helper function to render stations from VSM config
-function renderStations(stationsJson: unknown) {
-  if (!stationsJson || !Array.isArray(stationsJson)) return null;
-  const stations = stationsJson as Array<{name: string}>;
+// Helper function to render stations from VSM config - only operation names
+function renderOperationNames(stationsJson: unknown) {
+  if (!stationsJson) return null;
+  // Handle both array format and nested { stations: [...] } format
+  let stations: Array<{name?: string; opName?: string; processStep?: number; machineId?: string; machineIdDisplay?: string}>;
+  if (Array.isArray(stationsJson)) {
+    stations = stationsJson;
+  } else if (typeof stationsJson === 'object' && stationsJson !== null) {
+    const obj = stationsJson as any;
+    stations = obj.stations || obj.stationsJson || [];
+  } else {
+    return null;
+  }
+  if (!stations || stations.length === 0) return null;
+  
+  // Group by process step to get unique operations
+  const stepNames = new Map<number, string>();
+  stations.forEach(station => {
+    const step = station.processStep || 1;
+    if (!stepNames.has(step)) {
+      stepNames.set(step, station.name || station.opName || `Op ${step}`);
+    }
+  });
+  
+  const sortedSteps = Array.from(stepNames.entries()).sort((a, b) => a[0] - b[0]);
+  
   return (
-    <div className="flex flex-wrap items-center gap-1 py-2">
-      {stations.slice(0, 4).map((station, idx) => (
-        <div key={idx} className="flex items-center gap-1">
-          <Badge variant="outline" className="text-xs">
-            {station.name}
-          </Badge>
-          {idx < Math.min(stations.length, 4) - 1 && (
+    <div className="flex flex-wrap items-center gap-1">
+      {sortedSteps.slice(0, 5).map(([step, name], idx) => (
+        <div key={step} className="flex items-center gap-1">
+          <span className="text-xs font-medium">{name}</span>
+          {idx < Math.min(sortedSteps.length, 5) - 1 && (
             <ArrowRight className="h-3 w-3 text-muted-foreground flex-shrink-0" />
           )}
         </div>
       ))}
-      {stations.length > 4 && (
+      {sortedSteps.length > 5 && (
         <Badge variant="secondary" className="text-xs">
-          +{stations.length - 4} more
+          +{sortedSteps.length - 5} more
         </Badge>
       )}
     </div>
@@ -146,17 +166,6 @@ export default function Dashboard() {
     },
   });
 
-  const deleteVsmMutation = useMutation({
-    mutationFn: (id: string) => apiRequest("DELETE", `/api/vsm-configurations/${id}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/vsm-configurations"] });
-      toast({ title: "VSM deleted" });
-    },
-    onError: () => {
-      toast({ title: "Failed to delete VSM", variant: "destructive" });
-    },
-  });
-
   const updateVsmStatusMutation = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) =>
       apiRequest("PUT", `/api/vsm-configurations/${id}`, { status }),
@@ -238,7 +247,7 @@ export default function Dashboard() {
             <Factory className="h-10 w-10 text-primary" />
             <div>
               <h1 className="text-2xl font-bold">
-                Value Stream Dashboard
+                Value Stream Mapping Dashboard
               </h1>
               <p className="text-sm text-muted-foreground mt-1">
                 Manage machines and build value stream maps
@@ -310,82 +319,20 @@ export default function Dashboard() {
             <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
               {vsmConfigurations.map((vsm) => (
                 <Card key={vsm.id} className="hover:shadow-lg transition hover:border-purple-500/50 group">
-                  <CardHeader className="pb-3">
+                  <CardHeader className="pb-2">
                     <CardTitle className="text-xl flex items-center justify-between">
                       <Link href={`/vsm-builder?id=${vsm.id}`} className="flex items-center gap-2 cursor-pointer hover:text-purple-600 transition-colors">
                         <GitBranch className="h-5 w-5 text-purple-500" />
                         {vsm.name}
                       </Link>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          deleteVsmMutation.mutate(vsm.id);
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
                     </CardTitle>
                     {vsm.description && (
                       <p className="text-sm text-muted-foreground">{vsm.description}</p>
                     )}
-                    {/* Editable Cell Status - Focal Point */}
-                    <div className="mt-3">
-                      <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">Cell Status</div>
-                      {editingVsmStatus === vsm.id ? (
-                        <div className="flex items-center gap-2">
-                          <Input
-                            value={editVsmStatusValue}
-                            onChange={(e) => setEditVsmStatusValue(e.target.value)}
-                            placeholder="Enter cell status..."
-                            className="h-10 text-base font-semibold"
-                            autoFocus
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                updateVsmStatusMutation.mutate({ id: vsm.id, status: editVsmStatusValue });
-                              } else if (e.key === 'Escape') {
-                                setEditingVsmStatus(null);
-                              }
-                            }}
-                          />
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8"
-                            onClick={() => updateVsmStatusMutation.mutate({ id: vsm.id, status: editVsmStatusValue })}
-                          >
-                            <Check className="h-4 w-4 text-green-600" />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8"
-                            onClick={() => setEditingVsmStatus(null)}
-                          >
-                            <X className="h-4 w-4 text-muted-foreground" />
-                          </Button>
-                        </div>
-                      ) : (
-                        <div 
-                          className="text-base font-medium bg-muted/50 rounded-md px-3 py-2 cursor-pointer hover:bg-muted transition-colors flex items-center justify-between group/status min-h-[40px]"
-                          onClick={() => {
-                            setEditingVsmStatus(vsm.id);
-                            setEditVsmStatusValue(vsm.status || '');
-                          }}
-                        >
-                          <span className={vsm.status ? '' : 'text-muted-foreground italic font-normal text-sm'}>
-                            {vsm.status || 'Click to set status...'}
-                          </span>
-                          <Pencil className="h-4 w-4 text-muted-foreground opacity-0 group-hover/status:opacity-100 transition-opacity" />
-                        </div>
-                      )}
-                    </div>
                   </CardHeader>
                   <Link href={`/vsm-builder?id=${vsm.id}`} className="cursor-pointer">
-                    <CardContent className="space-y-3">
+                    <CardContent className="space-y-3 pt-0">
+                      {/* Metrics */}
                       <div className="grid grid-cols-2 gap-3">
                         {vsm.bottleneckRate && (
                           <div className="p-2 bg-muted/50 rounded">
@@ -400,12 +347,70 @@ export default function Dashboard() {
                           </div>
                         )}
                       </div>
-                      {renderStations(vsm.stationsJson)}
-                      <div className="text-xs text-muted-foreground text-center pt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      
+                      {/* Operation Names Flow */}
+                      <div className="py-2 border-y">
+                        <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Operations</div>
+                        {renderOperationNames(vsm.stationsJson)}
+                      </div>
+                      
+                      <div className="text-xs text-muted-foreground text-center pt-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         Click to view in VSM Builder
                       </div>
                     </CardContent>
                   </Link>
+                  
+                  {/* Cell Status at Bottom - Editable */}
+                  <div className="px-6 pb-4">
+                    <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Cell Status</div>
+                    {editingVsmStatus === vsm.id ? (
+                      <div className="flex items-center gap-2">
+                        <Input
+                          value={editVsmStatusValue}
+                          onChange={(e) => setEditVsmStatusValue(e.target.value)}
+                          placeholder="Enter cell status..."
+                          className="h-9 text-sm font-medium"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              updateVsmStatusMutation.mutate({ id: vsm.id, status: editVsmStatusValue });
+                            } else if (e.key === 'Escape') {
+                              setEditingVsmStatus(null);
+                            }
+                          }}
+                        />
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8"
+                          onClick={() => updateVsmStatusMutation.mutate({ id: vsm.id, status: editVsmStatusValue })}
+                        >
+                          <Check className="h-4 w-4 text-green-600" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8"
+                          onClick={() => setEditingVsmStatus(null)}
+                        >
+                          <X className="h-4 w-4 text-muted-foreground" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <div 
+                        className="text-sm font-medium bg-muted/50 rounded-md px-3 py-2 cursor-pointer hover:bg-muted transition-colors flex items-center justify-between group/status min-h-[36px]"
+                        onClick={() => {
+                          setEditingVsmStatus(vsm.id);
+                          setEditVsmStatusValue(vsm.status || '');
+                        }}
+                      >
+                        <span className={vsm.status ? '' : 'text-muted-foreground italic font-normal text-xs'}>
+                          {vsm.status || 'Click to set status...'}
+                        </span>
+                        <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover/status:opacity-100 transition-opacity" />
+                      </div>
+                    )}
+                  </div>
                 </Card>
               ))}
             </div>

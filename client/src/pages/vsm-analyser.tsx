@@ -1,4 +1,7 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { apiRequest } from '@/lib/queryClient';
+import { useEffect } from 'react';
 import { Plus, Trash2, Download, Factory, ArrowRight, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card';
@@ -11,7 +14,17 @@ import { exportVsmText } from '@/lib/vsm-export';
 import { simulateVsm } from '@/lib/vsm-sim';
 
 type Machine = { id: string; name: string; machineId?: string; cell?: string };
-type Station = { id: string; name: string; processStep: number; machineId?: string; machineIdDisplay?: string };
+type Station = { 
+  id: string; 
+  name: string; 
+  processStep: number; 
+  machineId?: string; 
+  machineIdDisplay?: string;
+  cycleTime?: number;
+  setupTime?: number;
+  batchSize?: number;
+  uptimePercent?: number;
+};
 
 function getShortId(id?: string) {
   if (!id) return '';
@@ -146,11 +159,13 @@ function VsmProcessFlow({
   selectedStep,
   setSelectedStep,
   removeStation,
+  updateStation,
 }: {
   stations: Station[];
   selectedStep: number | null;
   setSelectedStep: (s: number | null) => void;
   removeStation: (id: string) => void;
+  updateStation: (id: string, updates: Partial<Station>) => void;
 }) {
   const stepGroups = groupStationsByStep(stations);
   const sortedSteps = Array.from(stepGroups.keys()).sort((a, b) => a - b);
@@ -170,8 +185,8 @@ function VsmProcessFlow({
             const display = inStep.map(s => s.name + (s.machineIdDisplay ? ` (${getShortId(s.machineIdDisplay)})` : '')).join(', ');
             return (
               <div key={step} className="flex items-center gap-2">
-                <Badge onClick={() => setSelectedStep(selectedStep === step ? null : step)} className={`cursor-pointer ${selectedStep === step ? 'ring-2 ring-primary' : ''}`}>
-                  <span className="text-muted-foreground mr-1">Op{step}:</span>
+                <Badge onClick={() => setSelectedStep(selectedStep === step ? null : step)} className={`cursor-pointer hover:bg-primary/80 transition-colors ${selectedStep === step ? 'ring-2 ring-primary bg-primary text-primary-foreground' : ''}`}>
+                  <span className="mr-1">Op{step}:</span>
                   <span className="font-mono">{display}</span>
                 </Badge>
                 {idx < sortedSteps.length - 1 && <ArrowRight className="h-4 w-4 text-muted-foreground" />}
@@ -180,17 +195,87 @@ function VsmProcessFlow({
           })}
         </div>
         {selectedStep !== null && (
-          <div className="mt-3">
-            <div className="flex items-center justify-between">
+          <div className="mt-3 p-4 border rounded-lg bg-muted/30">
+            <div className="flex items-center justify-between mb-4">
               <div>
                 <h3 className="text-sm font-semibold">Op {selectedStep} Configuration</h3>
-                <p className="text-xs text-muted-foreground">Changes here are for VSM analysis only.</p>
+                <p className="text-xs text-muted-foreground">Configure cycle time, batch size, and uptime for this operation.</p>
               </div>
-              <div>
-                {stepGroups.get(selectedStep)?.map(s => (
-                  <Button key={s.id} variant="outline" size="sm" onClick={() => removeStation(s.id)} className="ml-2"><Trash2 className="h-4 w-4" /></Button>
-                ))}
-              </div>
+              <Button variant="ghost" size="sm" onClick={() => setSelectedStep(null)}>Close</Button>
+            </div>
+            <div className="space-y-4">
+              {stepGroups.get(selectedStep)?.map(station => (
+                <div key={station.id} className="p-3 border rounded bg-background">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="font-medium text-sm">
+                      {station.name}
+                      {station.machineIdDisplay && <span className="text-muted-foreground ml-2">#{station.machineIdDisplay}</span>}
+                    </div>
+                    <Button variant="outline" size="sm" onClick={() => removeStation(station.id)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div>
+                      <Label className="text-xs">Station Name</Label>
+                      <Input
+                        value={station.name}
+                        onChange={(e) => updateStation(station.id, { name: e.target.value })}
+                        className="mt-1 h-8 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Cycle Time (sec)</Label>
+                      <Input
+                        type="number"
+                        value={station.cycleTime ?? ''}
+                        onChange={(e) => updateStation(station.id, { cycleTime: e.target.value ? Number(e.target.value) : undefined })}
+                        placeholder="60"
+                        className="mt-1 h-8 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Batch Size</Label>
+                      <Input
+                        type="number"
+                        value={station.batchSize ?? ''}
+                        onChange={(e) => updateStation(station.id, { batchSize: e.target.value ? Number(e.target.value) : undefined })}
+                        placeholder="1"
+                        className="mt-1 h-8 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Uptime %</Label>
+                      <Input
+                        type="number"
+                        value={station.uptimePercent ?? ''}
+                        onChange={(e) => updateStation(station.id, { uptimePercent: e.target.value ? Number(e.target.value) : undefined })}
+                        placeholder="100"
+                        className="mt-1 h-8 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Op Step</Label>
+                      <Input
+                        type="number"
+                        value={station.processStep}
+                        onChange={(e) => updateStation(station.id, { processStep: Number(e.target.value) || 1 })}
+                        className="mt-1 h-8 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Setup Time (sec)</Label>
+                      <Input
+                        type="number"
+                        value={station.setupTime ?? ''}
+                        onChange={(e) => updateStation(station.id, { setupTime: e.target.value ? Number(e.target.value) : undefined })}
+                        placeholder="0"
+                        className="mt-1 h-8 text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -200,13 +285,28 @@ function VsmProcessFlow({
 }
 
 export default function VsmAnalyser() {
-  const [machines] = useState<Machine[]>([]); // TODO: load from API
+  // read id from URL query string
+  const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams('');
+  const vsmId = params.get('id');
+
+  const { data: vsmConfig, isLoading: vsmLoading } = useQuery({
+    queryKey: vsmId ? [`/api/vsm-configurations/${vsmId}`] : ['vsm-none'],
+    queryFn: async () => {
+      if (!vsmId) return null;
+      return apiRequest('GET', `/api/vsm-configurations/${vsmId}`);
+    },
+    enabled: !!vsmId,
+  });
+  const { data: machines = [], isLoading: machinesLoading } = useQuery<Machine[]>({
+    queryKey: ['/api/machines'],
+    queryFn: async () => apiRequest('GET', '/api/machines'),
+  });
   const [stations, setStations] = useState<Station[]>([]);
   const [vsmName, setVsmName] = useState('');
   const [vsmDescription, setVsmDescription] = useState('');
   const [vsmStatus, setVsmStatus] = useState('');
   const [selectedStep, setSelectedStep] = useState<number | null>(null);
-  const [isLoading] = useState(false);
+  const isLoading = vsmLoading || machinesLoading;
 
   function addMachineToVSM(m: Machine) {
     setStations(prev => [...prev, { id: Date.now().toString(), name: m.name, processStep: prevMaxStep(prev) + 1, machineId: m.id }]);
@@ -225,6 +325,10 @@ export default function VsmAnalyser() {
     setStations(prev => prev.filter(s => s.id !== id));
   }
 
+  function updateStation(id: string, updates: Partial<Station>) {
+    setStations(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
+  }
+
   function reset() {
     setStations([]);
     setVsmName('');
@@ -232,6 +336,36 @@ export default function VsmAnalyser() {
     setVsmStatus('');
     setSelectedStep(null);
   }
+
+  // when a VSM config is loaded, initialize the header and stations (only if user hasn't edited stations)
+  useEffect(() => {
+    if (!vsmConfig) return;
+    // set header fields
+    if (!vsmName) setVsmName(vsmConfig.name || '');
+    if (!vsmDescription) setVsmDescription(vsmConfig.description || '');
+    if (!vsmStatus) setVsmStatus(vsmConfig.status || '');
+    // initialize stations only when the current stations state is empty
+    if (stations.length === 0) {
+      try {
+        const raw = Array.isArray(vsmConfig.stationsJson) ? vsmConfig.stationsJson as any[] : (vsmConfig.stationsJson && (vsmConfig.stationsJson.stations || vsmConfig.stationsJson.stationsJson)) || vsmConfig.stations || [];
+        const normalized = (raw || []).map((r: any, idx: number) => ({
+          id: r.id || `s-${idx}`,
+          name: r.name || r.opName || r.operationName || (r.machine && r.machine.name) || `Op ${r.processStep || idx + 1}`,
+          processStep: r.processStep || (r.step || 1),
+          machineId: r.machineId || r.machine?.id || r.machine?.machineId,
+          machineIdDisplay: r.machineIdDisplay || r.machine?.machineId,
+          cycleTime: r.cycleTime || r.ct || r.cycle_time,
+          setupTime: r.setupTime || r.setup_time,
+          batchSize: r.batchSize || r.batch_size,
+          uptimePercent: r.uptimePercent || r.uptime_percent,
+        }));
+        setStations(normalized);
+      } catch (e) {
+        // ignore parsing errors and keep stations empty
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vsmConfig]);
 
   function exportVSM() {
     try {
@@ -250,6 +384,18 @@ export default function VsmAnalyser() {
       alert('Export failed');
     }
   }
+
+  // loadedStations is the current stations state (which will be initialized from vsmConfig when available)
+  const loadedStations: Station[] = stations;
+
+  const analysis = useMemo(() => {
+    if (!vsmConfig && stations.length === 0) return null;
+    try {
+      return simulateVsm(loadedStations as any);
+    } catch (e) {
+      return null;
+    }
+  }, [vsmConfig, loadedStations]);
 
   return (
     <div className="vsm-page h-full overflow-auto bg-background p-3 sm:p-4">
@@ -270,7 +416,63 @@ export default function VsmAnalyser() {
         <Button onClick={exportVSM} size="sm"><Download className="mr-2 h-4 w-4" /> Export</Button>
       </div>
 
-      <VsmProcessFlow stations={stations} selectedStep={selectedStep} setSelectedStep={setSelectedStep} removeStation={removeStation} />
+      <VsmProcessFlow stations={stations} selectedStep={selectedStep} setSelectedStep={setSelectedStep} removeStation={removeStation} updateStation={updateStation} />
+      {/* Analysis preview for saved VSM */}
+      {vsmConfig && analysis && (
+        <Card className="mt-4">
+          <CardHeader>
+            <CardTitle>Value Stream Analysis</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="p-3 bg-muted/50 rounded">
+                  <div className="text-xs text-muted-foreground">System Throughput</div>
+                  <div className="text-2xl font-bold">{Math.round(analysis.systemThroughputUPH)} UPH</div>
+                </div>
+                <div className="p-3 bg-muted/50 rounded">
+                  <div className="text-xs text-muted-foreground">Total Lead Time</div>
+                  <div className="text-2xl font-bold">{analysis.totalLeadTimeSec.toFixed(1)} sec</div>
+                </div>
+                <div className="p-3 bg-muted/50 rounded">
+                  <div className="text-xs text-muted-foreground">Process Efficiency</div>
+                  <div className="text-2xl font-bold">{analysis.processEfficiencyPercent.toFixed(0)}%</div>
+                </div>
+              </div>
+
+              <div>
+                {analysis.steps.map(step => (
+                  <Card key={step.step} className="mb-2">
+                    <CardContent>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="text-sm font-medium">Op {step.step} — {step.stations.map(s=>s.name).join(', ')}</div>
+                          <div className="text-xs text-muted-foreground">{step.machines} machines • Eff CT: {step.effectiveCTsec.toFixed(1)}s</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-sm">Comb Rate: <span className="font-bold">{Math.round(step.combinedRateUPH)} UPH</span></div>
+                          <div className="text-xs">Per Machine (Avg): {Math.round((analysis.systemThroughputUPH / Math.max(1, step.machines)))} UPH</div>
+                          <div className="text-xs">Util: {Math.round(step.avgUtilPercent)}%</div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+
+              <div>
+                <h4 className="font-semibold">Key Insights</h4>
+                <ul className="list-disc pl-5 text-sm">
+                  {analysis.bottleneckStep && (
+                    <li>Op {analysis.bottleneckStep.step} is your constraint - limiting output to {Math.round(analysis.systemThroughputUPH)} UPH</li>
+                  )}
+                  <li>To increase throughput: add parallel machines at the bottleneck or reduce individual cycle times.</li>
+                </ul>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
