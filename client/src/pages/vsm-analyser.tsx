@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { apiRequest, queryClient } from '@/lib/queryClient';
@@ -98,6 +99,8 @@ export default function VSMBuilder() {
   // Editable WIP UI state (editing a buffer after an op)
   const [editingWipStep, setEditingWipStep] = useState<number | null>(null);
   const [editingWipValue, setEditingWipValue] = useState<string>('');
+  const [supplyRateUPH, setSupplyRateUPH] = useState<number | null>(null);
+  const [simTargetCompleted, setSimTargetCompleted] = useState<number | null>(null);
 
   // Parse VSM ID from URL query params
   const vsmIdFromUrl = new URLSearchParams(searchString).get('id');
@@ -129,9 +132,11 @@ export default function VSMBuilder() {
         if (Array.isArray(stationsData)) {
           setStations(stationsData);
           setWipInventory([]);
+          setSupplyRateUPH(null);
         } else {
           setStations(stationsData.stations || []);
           setWipInventory(stationsData.wipInventory || []);
+          setSupplyRateUPH(typeof stationsData.supplyRateUPH === 'number' ? stationsData.supplyRateUPH : null);
         }
       }
     }
@@ -150,6 +155,7 @@ export default function VSMBuilder() {
       setVsmNotes('');
       setStations([]);
       setWipInventory([]);
+      setSupplyRateUPH(null);
     },
     onError: () => {
       toast({ title: 'Failed to save VSM', variant: 'destructive' });
@@ -172,7 +178,7 @@ export default function VSMBuilder() {
       description: vsmDescription,
       status: vsmStatus,
       notes: vsmNotes,
-      stationsJson: { stations, wipInventory },
+      stationsJson: { stations, wipInventory, supplyRateUPH },
       bottleneckRate,
       processEfficiency,
       totalWip: wipInventory.reduce((sum, w) => sum + w.quantity, 0)
@@ -387,6 +393,7 @@ export default function VSMBuilder() {
     setVsmName('');
     setVsmDescription('');
     setLoadedVsmId(null);
+    setSupplyRateUPH(null);
     // Clear URL param if present
     if (vsmIdFromUrl) {
       setLocation('/vsm-builder');
@@ -406,13 +413,14 @@ export default function VSMBuilder() {
     const bottleneckStep = stepMetrics[bottleneckStepIndex];
     
     let content = `VALUE STREAM MAP ANALYSIS REPORT
-Generated: ${date} at ${time}
+  VSM: ${vsmName || 'Untitled'}
+  Generated: ${date} at ${time}
 
-================================================================================
-PROCESS FLOW OVERVIEW (Step-Based Analysis)
-================================================================================
+  ================================================================================
+  PROCESS FLOW OVERVIEW (Step-Based Analysis)
+  ================================================================================
 
-`;
+  `;
 
     // Process steps (grouped by parallel machines)
     stepMetrics.forEach((step, index) => {
@@ -566,7 +574,11 @@ WIP INVENTORY & LITTLE'S LAW ANALYSIS
 
     content += `CURRENT WIP STATUS (from VSM buffers):\n\n`;
 
-    content += `  [IN] Continuous Supply (∞)\n`;
+    // Report actual input supply rate (use user override if provided, otherwise first operation combined rate)
+    const inputRatePerSecond = supplyRateUPH ? (supplyRateUPH / 3600) : ((sortedSteps[0]?.combinedRate) || 0);
+    const inputRatePerHour = inputRatePerSecond * 3600;
+    const inputRatePerShift = inputRatePerHour * 8;
+    content += `  [IN] Supply Rate: ${inputRatePerHour.toFixed(0)} UPH (~${inputRatePerShift.toFixed(0)} units/8-hour shift)\n`;
 
     // WIP between each operation (from `wipInventory`)
     sortedSteps.forEach((step, idx) => {
@@ -619,40 +631,61 @@ System receives new material at the rate of the first operation.
 
 `;
 
-    // Run simulation for 300 seconds with continuous input
+    // Run simulation with continuous input. If `simTargetCompleted` is set,
+    // capture snapshots at completed-unit milestones up to that target (useful
+    // for large targets like 10,000); otherwise use time-based snapshots.
     const simSteps = sortedSteps;
-    // Initialize simulation buffers using saved VSM `wipInventory` so the
-    // simulation starts from the current inventory state instead of zeros.
     const simWip: {[key: number]: number} = { 0: 0 };
     simSteps.forEach(step => {
       const entry = (wipInventory || []).find(w => w.afterOpNumber === step.stepNumber);
       simWip[step.stepNumber] = entry ? (entry.quantity || 0) : 0;
     });
-    
+
     const snapshots: {time: number, wip: {[key: number]: number}, exited: number, totalWip: number}[] = [];
     let totalExited = 0;
-    
-    // Run simulation
-    for (let t = 0; t <= 300; t++) {
-      // Continuous input: feed at first operation's rate
-      const firstStep = simSteps[0];
-      if (firstStep) {
-        simWip[0] = (simWip[0] || 0) + firstStep.combinedRate;
-      }
-      
+
+    // Determine snapshot strategy
+    const captureByCompleted = !!(simTargetCompleted && simTargetCompleted > 0);
+    let milestones: number[] = [];
+    if (captureByCompleted) {
+      const target = Math.max(0, Math.floor(simTargetCompleted || 0));
+      const setM = new Set<number>([0, Math.floor(target * 0.10), Math.floor(target * 0.25), Math.floor(target * 0.5), Math.floor(target * 0.75), target]);
+      milestones = Array.from(setM).sort((a,b) => a - b);
+    }
+
+    // Compute a safe maximum simulation duration (seconds). If we have a
+    // bottleneckRate (units/sec), estimate required seconds and add a buffer.
+    let maxSimSeconds = 300;
+    if (captureByCompleted && bottleneckRate > 0) {
+      const secondsNeeded = Math.ceil((simTargetCompleted || 0) / Math.max(1e-9, bottleneckRate));
+      maxSimSeconds = Math.min(Math.max(300, secondsNeeded * 2), 1000000);
+    }
+
+    // If capturing by completed, track next milestone index
+    let nextMilestoneIdx = 0;
+
+    // Always capture initial snapshot
+    const initialWipSum = Object.entries(simWip).filter(([k]) => parseInt(k) > 0).reduce((s, [, v]) => s + v, 0);
+    snapshots.push({ time: 0, wip: { ...simWip }, exited: 0, totalWip: initialWipSum });
+
+    // Run simulation loop (per-second)
+    for (let t = 1; t <= maxSimSeconds; t++) {
+      // Continuous input: feed at configured supply rate (per-second)
+      simWip[0] = (simWip[0] || 0) + inputRatePerSecond;
+
       // Process each step
       simSteps.forEach((step, idx) => {
         const upstreamBuffer = idx === 0 ? 0 : simSteps[idx - 1].stepNumber;
         const currentBuffer = step.stepNumber;
         const unitsPerSecond = step.combinedRate;
         const canProcess = Math.min(simWip[upstreamBuffer] || 0, unitsPerSecond);
-        
+
         if (canProcess > 0) {
           simWip[upstreamBuffer] = Math.max(0, (simWip[upstreamBuffer] || 0) - canProcess);
           simWip[currentBuffer] = (simWip[currentBuffer] || 0) + canProcess;
         }
       });
-      
+
       // Exit from last buffer
       const lastStep = simSteps[simSteps.length - 1];
       if (lastStep) {
@@ -661,38 +694,48 @@ System receives new material at the rate of the first operation.
         simWip[lastStep.stepNumber] = Math.max(0, (simWip[lastStep.stepNumber] || 0) - exiting);
         totalExited += exiting;
       }
-      
+
       // Calculate total WIP
       const wipSum = Object.entries(simWip)
         .filter(([key]) => parseInt(key) > 0)
         .reduce((sum, [, val]) => sum + val, 0);
-      
-      // Capture snapshots at key intervals
-      if (t === 0 || t === 30 || t === 60 || t === 120 || t === 180 || t === 300) {
-        snapshots.push({ time: t, wip: { ...simWip }, exited: totalExited, totalWip: wipSum });
+
+      if (captureByCompleted) {
+        // Capture when we reach the next completed-unit milestone
+        while (nextMilestoneIdx < milestones.length && totalExited >= milestones[nextMilestoneIdx]) {
+          snapshots.push({ time: t, wip: { ...simWip }, exited: totalExited, totalWip: wipSum });
+          nextMilestoneIdx++;
+        }
+        // Stop if we've captured the final milestone
+        if (nextMilestoneIdx >= milestones.length) break;
+      } else {
+        // Time-based snapshots (legacy behavior)
+        if (t === 30 || t === 60 || t === 120 || t === 180 || t === 300) {
+          snapshots.push({ time: t, wip: { ...simWip }, exited: totalExited, totalWip: wipSum });
+        }
       }
     }
     
-    // Format simulation results as a table
-    content += `Time (sec) │ Total WIP │`;
+    // Format simulation results as a table (WIP over completed throughput)
+    content += `Completed Throughput │ Total WIP │`;
     simSteps.forEach(step => {
       content += ` After Op${step.stepNumber} │`;
     });
     content += ` Exited\n`;
     
-    content += `───────────┼───────────┼`;
+    content += `───────────────────┼───────────┼`;
     simSteps.forEach(() => {
       content += `───────────┼`;
     });
     content += `────────\n`;
     
     snapshots.forEach(snap => {
-      const timeStr = snap.time.toString().padStart(9);
-      const totalWipStr = snap.totalWip.toFixed(0).padStart(9);
-      let row = `${timeStr} │${totalWipStr} │`;
+      const completedStr = snap.exited.toFixed(0).padStart(19);
+      const totalWipStr = snap.totalWip.toFixed(0).padStart(11);
+      let row = `${completedStr} │${totalWipStr} │`;
       
       simSteps.forEach(step => {
-        const wipStr = (snap.wip[step.stepNumber] || 0).toFixed(0).padStart(9);
+        const wipStr = (snap.wip[step.stepNumber] || 0).toFixed(0).padStart(11);
         row += `${wipStr} │`;
       });
       
@@ -766,12 +809,27 @@ END OF REPORT
     setVsmName('');
     setVsmDescription('');
     setLoadedVsmId(null);
+    setSupplyRateUPH(null);
     // Clear URL param
     setLocation('/vsm-builder');
   };
 
   return (
-    <div className="h-full overflow-auto bg-background p-3 sm:p-4">
+    <div className="vsm-page h-full overflow-auto bg-background p-3 sm:p-4">
+      <style>{`
+        .vsm-page input[type=number]::-webkit-outer-spin-button,
+        .vsm-page input[type=number]::-webkit-inner-spin-button {
+          -webkit-appearance: none;
+          margin: 0;
+        }
+        .vsm-page input[type=number] {
+          -moz-appearance: textfield;
+        }
+        /* Hide tooltip triggers on small screens (mobile) */
+        @media (max-width: 640px) {
+          .vsm-page .tooltip-trigger { display: none; }
+        }
+      `}</style>
       <div className="max-w-full mx-auto">
         {/* Header - Mobile responsive */}
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
@@ -786,6 +844,7 @@ END OF REPORT
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            {/* supply rate moved into process flow IN box */}
             {loadedVsmId && (
               <Button
                 onClick={handleNewVsm}
@@ -1391,13 +1450,92 @@ END OF REPORT
                   maxWidth: '100%',
                   minHeight: '320px'
                 }}>
-                  {/* Starting Input (Continuous Supply) */}
+                  {/* Starting Input (Supply) - editable inline */}
                   {stepMetrics.length > 0 && (
                     <div className="flex flex-col items-center gap-1 flex-shrink-0" style={{ marginTop: '20px' }}>
                       <div className="flex flex-col items-center">
                         <div className="text-[8px] text-muted-foreground mb-1">IN</div>
-                        <div className="text-lg">∞</div>
-                        <span className="text-[9px] text-muted-foreground mt-0.5">supply</span>
+                        <div className="flex items-center space-x-2">
+                          <Input
+                            type="number"
+                            value={supplyRateUPH ?? ''}
+                            onChange={(e) => setSupplyRateUPH(e.target.value ? Number(e.target.value) : null)}
+                            placeholder="auto"
+                            className="w-20 text-xs text-center"
+                          />
+                          <Tooltip>
+                              <TooltipTrigger asChild>
+                              <button className="p-0 text-muted-foreground tooltip-trigger" aria-label="Supply help">
+                                <HelpCircle className="h-4 w-4" />
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top">
+                              Leave blank for <strong>auto</strong>: uses the first operation's combined capacity as the incoming supply rate.
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
+                        <span className="text-[9px] text-muted-foreground mt-0.5">supply UPH</span>
+                        <div className="flex items-center space-x-2 mt-1">
+                          <Input
+                            type="number"
+                            value={simTargetCompleted ?? ''}
+                            onChange={(e) => setSimTargetCompleted(e.target.value ? Number(e.target.value) : null)}
+                            placeholder="e.g. 10000"
+                            className="w-28 text-xs text-center"
+                          />
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                                <button className="p-0 text-muted-foreground tooltip-trigger" aria-label="Sim target help">
+                                  <HelpCircle className="h-4 w-4" />
+                                </button>
+                              </TooltipTrigger>
+                            <TooltipContent side="top">
+                              Target units (e.g. 10000). Snapshots: 0/10/25/50/75/100%. Blank = time-based.
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
+                        <span className="text-[9px] text-muted-foreground">sim target</span>
+                        {supplyRateUPH !== null && (
+                          (() => {
+                            const entry0 = (wipInventory || []).find(w => w.afterOpNumber === 0);
+                            const displayQty0 = entry0 ? entry0.quantity : 0;
+                            const hasWip0 = displayQty0 > 0;
+
+                            return (
+                              <div className="mt-2 flex flex-col items-center" title={`WIP before first op`}>
+                                <div
+                                  onClick={() => {
+                                    setEditingWipStep(0);
+                                    setEditingWipValue(displayQty0 ? String(Math.round(displayQty0)) : '');
+                                  }}
+                                  className={`w-0 h-0 border-l-[16px] border-r-[16px] border-t-[20px] border-l-transparent border-r-transparent ${hasWip0 ? 'border-t-yellow-500' : 'border-t-gray-300'}`}
+                                />
+
+                                {editingWipStep === 0 ? (
+                                  <input
+                                    autoFocus
+                                    value={editingWipValue}
+                                    onChange={(e) => setEditingWipValue(e.target.value.replace(/[^0-9]/g, ''))}
+                                    onBlur={() => {
+                                      const val = editingWipValue === '' ? 0 : parseInt(editingWipValue || '0', 10);
+                                      saveWipForStep(0, Number.isNaN(val) ? 0 : val);
+                                      setEditingWipStep(null);
+                                      setEditingWipValue('');
+                                    }}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                                    className="mt-0.5 w-20 text-center text-[12px] font-bold bg-transparent border rounded"
+                                  />
+                                ) : (
+                                  <span className={`text-[12px] font-bold mt-0.5 ${hasWip0 ? 'text-yellow-600 dark:text-yellow-400' : 'text-muted-foreground'}`}>
+                                    {displayQty0.toFixed(0)}
+                                  </span>
+                                )}
+
+                                <div className="text-[9px] text-muted-foreground mt-1">Initial inventory</div>
+                              </div>
+                            );
+                          })()
+                        )}
                       </div>
                       <div className="text-lg sm:text-2xl text-muted-foreground font-bold mt-1">→</div>
                     </div>
