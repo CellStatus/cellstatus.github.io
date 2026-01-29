@@ -40,6 +40,35 @@ app.use(
   })
 );
 
+// Explicitly ensure CORS headers are present for all /api requests and
+// always respond to preflight OPTIONS before other middleware (rate limiter,
+// etc.) can interfere. This is a defensive layer in addition to the `cors`
+// middleware above to prevent missing Access-Control-Allow-Origin headers in
+// some proxy/deployment environments.
+app.use((req, res, next) => {
+  const origin = req.headers.origin as string | undefined;
+  if (origin && allowedOrigins.some((allowed) => origin.startsWith(allowed))) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.setHeader(
+      "Access-Control-Allow-Methods",
+      "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+    );
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type,Authorization,Cache-Control,Pragma",
+    );
+  }
+
+  if (req.method === "OPTIONS") {
+    // Short-circuit preflight requests
+    res.status(204).end();
+    return;
+  }
+
+  next();
+});
+
 // Rate limiting to prevent abuse
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
