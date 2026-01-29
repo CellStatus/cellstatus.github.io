@@ -4,7 +4,7 @@ import path from "path";
 // Replit dev plugins removed
 
 export default defineConfig({
-  base: '/cellstatus.github.io/',
+  base: '/',
   plugins: [react()],
   resolve: {
     alias: {
