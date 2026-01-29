@@ -18,7 +18,7 @@ declare module "http" {
 
 // CORS configuration for GitHub Pages frontend
 const allowedOrigins = [
-  "https://rwaynewhite15.github.io",
+  "https://cellstatus.github.io",
   "http://localhost:5173", // Vite dev server
   "http://localhost:5000", // Local production test
 ];
