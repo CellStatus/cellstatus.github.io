@@ -4,8 +4,7 @@ import path from "path";
 // Replit dev plugins removed
 
 export default defineConfig({
-  // Set base for GitHub Pages. Replace "/CellStatus/" if your repo name differs.
-  base: "/CellStatus/",
+  base: '/cellstatus.github.io/',
   plugins: [react()],
   resolve: {
     alias: {
