@@ -2,7 +2,7 @@ import React, { useState, useRef, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { useEffect } from 'react';
-import { Plus, Trash2, Download, Factory, ArrowRight, Save } from 'lucide-react';
+import { Plus, Trash2, Download, Factory, ArrowRight, Save, Copy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -10,8 +10,9 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { Skeleton } from '@/components/ui/skeleton';
-import { exportVsmMarkdown } from '@/lib/vsm-export';
+import { exportVsmMarkdown, exportVsmText } from '@/lib/vsm-export';
 import { simulateVsm, type VsmStation } from '@/lib/vsm-sim';
+import { useToast } from '@/hooks/use-toast';
 
 type Machine = { id: string; name: string; machineId?: string; cell?: string };
 type Station = { 
@@ -307,6 +308,7 @@ export default function VsmAnalyser() {
   const [vsmStatus, setVsmStatus] = useState('');
   const [selectedStep, setSelectedStep] = useState<number | null>(null);
   const isLoading = vsmLoading || machinesLoading;
+  const { toast } = useToast();
 
   function addMachineToVSM(m: Machine) {
     setStations(prev => [...prev, { id: Date.now().toString(), name: m.name, processStep: prevMaxStep(prev) + 1, machineId: m.id }]);
@@ -431,6 +433,58 @@ export default function VsmAnalyser() {
     }
   }
 
+  // Export plain text (.txt) using legacy exporter
+  async function exportTxtVSM() {
+    try {
+      const vsmStations: VsmStation[] = stations.map(s => ({
+        id: s.id,
+        name: s.name,
+        processStep: s.processStep,
+        machineId: s.machineId,
+        machineIdDisplay: s.machineIdDisplay,
+        cycleTime: s.cycleTime,
+        setupTime: s.setupTime,
+        batchSize: s.batchSize,
+        uptimePercent: s.uptimePercent,
+      }));
+      const txt = exportVsmText(vsmName || 'VSM', vsmDescription, vsmStations);
+      const safeName = (vsmName || 'VSM').replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '_');
+      const filename = `${safeName}_${new Date().toISOString().slice(0,10)}.txt`;
+      const blob = new Blob([txt], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast({ title: 'Exported TXT' });
+    } catch (err) {
+      toast({ title: 'Export failed', variant: 'destructive' });
+    }
+  }
+
+  // Duplicate VSM by POSTing to VSM configurations endpoint
+  async function duplicateVSM() {
+    if (!vsmConfig) return;
+    try {
+      const copyName = `${vsmConfig.name} (copy)`;
+      const payload = { ...vsmConfig, name: copyName };
+      // Remove id so server creates a new record
+      delete (payload as any).id;
+      const res = await apiRequest('POST', '/api/vsm-configurations', payload);
+      toast({ title: 'VSM duplicated' });
+      // navigate to new VSM builder if created
+      if (res?.id) {
+        const baseUrl = import.meta.env.BASE_URL || '/';
+        window.location.href = `${baseUrl}vsm-builder?id=${res.id}`;
+      }
+    } catch (err) {
+      toast({ title: 'Duplicate failed', variant: 'destructive' });
+    }
+  }
+
   // Helper function to download file
   function downloadFile(content: string, filename: string) {
     const blob = new Blob([content], { type: 'text/markdown' });
@@ -472,7 +526,7 @@ export default function VsmAnalyser() {
       <VsmMachineSelector machines={machines} stations={stations} addMachineToVSM={addMachineToVSM} addCustomStation={addCustomStation} isLoading={isLoading} />
 
       <div className="mb-4 flex justify-end gap-2">
-        <Button onClick={exportVSM} size="sm"><Download className="mr-2 h-4 w-4" /> Export</Button>
+        <Button size="sm" variant="ghost" onClick={duplicateVSM}><Copy className="mr-2 h-4 w-4" /> Copy</Button>
       </div>
 
       <VsmProcessFlow stations={stations} selectedStep={selectedStep} setSelectedStep={setSelectedStep} removeStation={removeStation} updateStation={updateStation} />

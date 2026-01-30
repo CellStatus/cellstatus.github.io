@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Link, useSearch } from 'wouter';
 import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { ArrowRight, Trash2, ChevronUp, ChevronDown, Plus, Factory, HelpCircle } from 'lucide-react';
+import { ArrowRight, Trash2, ChevronUp, ChevronDown, Plus, Factory, HelpCircle, Copy, Download } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,8 +25,9 @@ import {
 } from '@/components/ui/dialog';
 import { apiRequest } from '@/lib/queryClient';
 import { simulateVsm, VsmStation, VsmDetailedMetrics, VsmConfig, computeStationUPH, computePerUnitCycleTimeSec, computeEffectiveCycleTimeSec } from '@/lib/vsm-sim';
-import { exportVsmMarkdown } from '@/lib/vsm-export';
+import { exportVsmMarkdown, exportVsmText } from '@/lib/vsm-export';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -893,6 +894,7 @@ export default function VsmBuilder() {
   const [importError, setImportError] = useState<string | null>(null);
   const [importedStations, setImportedStations] = useState<VsmStation[] | null>(null);
   const [importMetrics, setImportMetrics] = useState<VsmDetailedMetrics | null>(null);
+  const { toast } = useToast();
   
   // Get URL params - useSearch returns the query string reactively
   const searchString = useSearch();
@@ -1205,19 +1207,26 @@ export default function VsmBuilder() {
                       <Link href={`/vsm-builder?id=${v.id}`}>
                         <Button size="sm">Open</Button>
                       </Link>
-                      <Button size="sm" onClick={async () => {
-                        // export markdown report to VSM Reports folder
+                      
+                      
+                      <Button size="sm" variant="outline" onClick={async () => {
                         try {
-                          const stationsData = v.stationsJson as any;
-                          const stations = Array.isArray(stationsData) ? stationsData : (stationsData?.stations || stationsData || []);
-                          const rawUPH = stationsData?.rawMaterialUPH;
-                          const opNames = stationsData?.operationNames || {};
-                          const md = exportVsmMarkdown(v.name, v.description || '', stations, rawUPH, opNames);
-                          await exportVsmToFile(md, v.name);
+                          const payload = { ...v, name: `${v.name} (copy)` } as any;
+                          delete payload.id;
+                          const created = await apiRequest('POST', '/api/vsm-configurations', payload);
+                          queryClient.invalidateQueries({ queryKey: ['/api/vsm-configurations', 'list'] });
+                          toast({ title: 'VSM duplicated' });
+                          if (created?.id) {
+                            const baseUrl = import.meta.env.BASE_URL || '/';
+                            window.location.href = `${baseUrl}vsm-builder?id=${created.id}`;
+                          }
                         } catch (err) {
-                          alert('Export failed');
+                          toast({ title: 'Duplicate failed', variant: 'destructive' });
                         }
-                      }}>Export</Button>
+                      }}>
+                        <Copy className="h-4 w-4 mr-1" />
+                        Copy
+                      </Button>
                       <Button 
                         size="sm" 
                         variant="outline" 
@@ -1395,19 +1404,28 @@ export default function VsmBuilder() {
                       <Button size="sm" onClick={saveEditedVsm}>Save Changes</Button>
                     </>
                   )}
-                  <Button 
-                    size="sm" 
-                    variant="outline"
-                    onClick={async () => {
-                      try {
-                        const md = exportVsmMarkdown(editingName, editingDescription, editingStations || [], rawMaterialUPH, operationNames);
-                        await exportVsmToFile(md, editingName);
-                      } catch (err) {
-                        alert('Export failed');
+                  
+                  
+                  <Button size="sm" variant="ghost" onClick={async () => {
+                    try {
+                      const payload = {
+                        name: `${editingName} (copy)`,
+                        description: editingDescription,
+                        status: editingStatus,
+                        stationsJson: { stations: editingStations || [] },
+                      } as any;
+                      const created = await apiRequest('POST', '/api/vsm-configurations', payload);
+                      queryClient.invalidateQueries({ queryKey: ['/api/vsm-configurations', 'list'] });
+                      toast({ title: 'VSM duplicated' });
+                      if (created?.id) {
+                        const baseUrl = import.meta.env.BASE_URL || '/';
+                        window.location.href = `${baseUrl}vsm-builder?id=${created.id}`;
                       }
-                    }}
-                  >
-                    Export
+                    } catch (err) {
+                      toast({ title: 'Duplicate failed', variant: 'destructive' });
+                    }
+                  }}>
+                    <Copy className="mr-2 h-4 w-4" />Copy
                   </Button>
                   <Button 
                     size="sm" 
