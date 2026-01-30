@@ -55,10 +55,12 @@ export default function AuditFindings() {
       const char = u.searchParams.get('char');
       const pn = u.searchParams.get('partNumber');
       const statusParam = u.searchParams.get('status');
+      const openNewParam = u.searchParams.get('openNew');
       if (mid) setFilterMachineId(mid);
       if (char) setSearch(char);
       if (pn) setFilterPartNumber(pn);
       if (statusParam === 'open' || statusParam === 'closed') setFilterStatus(statusParam as 'open' | 'closed');
+      if (openNewParam) setOpenNew(true);
     } catch (e) {
       // ignore
     }

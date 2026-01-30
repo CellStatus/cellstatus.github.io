@@ -452,6 +452,12 @@ export default function Dashboard() {
             <CardContent>
               <div className="text-3xl font-bold">{totalFindings}</div>
               <p className="text-xs text-muted-foreground">all-time findings</p>
+              <div className="mt-3">
+                <Button size="sm" onClick={() => setLocation('/audit-findings?openNew=1')}> 
+                  <Plus className="mr-2 h-3 w-3" />
+                  New Finding
+                </Button>
+              </div>
             </CardContent>
           </Card>
           <Card>
