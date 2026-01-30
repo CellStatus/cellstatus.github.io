@@ -66,7 +66,7 @@ app.use((req, res, next) => {
     );
     res.setHeader(
       "Access-Control-Allow-Headers",
-      "Content-Type,Authorization,Cache-Control,Pragma",
+      "Content-Type,Authorization,Cache-Control,Pragma,x-api-password",
     );
   }
 
