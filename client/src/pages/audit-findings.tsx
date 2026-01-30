@@ -524,7 +524,7 @@ export default function AuditFindings() {
       {/* Edit Characteristic Modal */}
       {editCharOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-background p-6 rounded shadow-lg w-full max-w-md">
+          <div className="bg-background p-4 sm:p-6 rounded shadow-lg w-full max-w-full sm:max-w-md mx-3 sm:mx-0 max-h-[85vh] overflow-y-auto">
             <h3 className="text-lg font-semibold mb-2">Edit Characteristic</h3>
             <div className="space-y-3">
               <div>
@@ -611,7 +611,7 @@ export default function AuditFindings() {
       {/* New Finding Modal */}
       {openNew && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-background p-6 rounded shadow-lg w-full max-w-md">
+          <div className="bg-background p-4 sm:p-6 rounded shadow-lg w-full max-w-full sm:max-w-md mx-3 sm:mx-0 max-h-[85vh] overflow-y-auto">
             <h3 className="text-lg font-semibold mb-2">New Audit Finding</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="md:col-span-1">
