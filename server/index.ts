@@ -38,21 +38,8 @@ app.options("/api/*", (req, res) => {
   res.status(204).end();
 });
 
-// Password protection middleware for all API routes
-const API_PASSWORD = process.env.API_PASSWORD || "changeme"; // Set your password here or in .env
-app.use("/api", (req, res, next) => {
-  // Allow CORS preflight requests through so the browser can see
-  // Access-Control-Allow-* headers before attempting the real request.
-  if (req.method === "OPTIONS") {
-    return next();
-  }
-
-  const password = req.headers["x-api-password"];
-  if (!password || password !== API_PASSWORD) {
-    return res.status(401).json({ message: "Unauthorized: Invalid or missing API password." });
-  }
-  next();
-});
+// NOTE: API password middleware is registered later, after CORS/preflight handlers,
+// so preflight OPTIONS requests are handled and do not get rejected by auth.
 
 app.use(
   cors({
@@ -97,6 +84,19 @@ app.use((req, res, next) => {
     return;
   }
 
+  next();
+});
+
+// Password protection middleware for all API routes
+const API_PASSWORD = process.env.API_PASSWORD || "changeme"; // Set your password here or in .env
+app.use("/api", (req, res, next) => {
+  // Preflight requests are already handled above; allow OPTIONS through
+  if (req.method === "OPTIONS") return next();
+
+  const password = req.headers["x-api-password"] as string | undefined;
+  if (!password || password !== API_PASSWORD) {
+    return res.status(401).json({ message: "Unauthorized: Invalid or missing API password." });
+  }
   next();
 });
 
