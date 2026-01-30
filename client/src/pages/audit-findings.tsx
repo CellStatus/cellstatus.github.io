@@ -23,6 +23,7 @@ export default function AuditFindings() {
   const { toast } = useToast();
   const [openNew, setOpenNew] = useState(false);
   const [selMachine, setSelMachine] = useState<string | null>(null);
+  const [machineSearch, setMachineSearch] = useState('');
   const [charac, setCharac] = useState('');
   const [nominal, setNominal] = useState('');
   const [plusMinus, setPlusMinus] = useState('');
@@ -313,6 +314,7 @@ export default function AuditFindings() {
 
   const openNewFor = (machineId?: string) => {
     setSelMachine(machineId ?? machines?.[0]?.id ?? null);
+    setMachineSearch('');
     setStatus('open');
     setPartNumber('');
     setPartName('');
@@ -612,13 +614,21 @@ export default function AuditFindings() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="md:col-span-1">
                 <label className="text-xs text-muted-foreground">Machine</label>
+                <Input className="mb-2" placeholder="Search by name or last 3 digits" value={machineSearch} onChange={(e) => setMachineSearch(e.target.value)} />
                 <Select onValueChange={(v) => setSelMachine(v)} value={selMachine ?? undefined}>
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="Select machine" />
                   </SelectTrigger>
                   <SelectContent>
-                    {machines.map(m => (
-                      <SelectItem key={m.id} value={m.id}>{m.name} {m.machineId ? `(${String(m.machineId).slice(-3)})` : ''}</SelectItem>
+                    {(machines || []).filter(m => {
+                      const q = machineSearch.trim().toLowerCase();
+                      if (!q) return true;
+                      const name = (m.name || '').toString().toLowerCase();
+                      const mid = (m.machineId || '').toString().toLowerCase();
+                      const suffix3 = mid.slice(-3);
+                      return name.includes(q) || mid.includes(q) || suffix3.includes(q);
+                    }).map(m => (
+                      <SelectItem key={m.id} value={m.id}>{m.name} {m.machineId ? `(...${String(m.machineId).slice(-3)})` : ''}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
