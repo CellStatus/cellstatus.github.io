@@ -4,6 +4,7 @@ import {
   GitBranch,
   Settings2,
   Factory,
+  FileText,
 } from "lucide-react";
 import {
   Sidebar,
@@ -34,6 +35,11 @@ const navItems = [
     url: "/vsm-builder",
     icon: GitBranch,
   },
+  {
+    title: "Audit Findings",
+    url: "/audit-findings",
+    icon: FileText,
+  },
 ];
 
 export function AppSidebar() {
@@ -48,7 +54,7 @@ export function AppSidebar() {
           </div>
           <div className="flex flex-col">
             <span className="text-lg font-semibold" data-testid="text-app-title">CellStatus</span>
-            <span className="text-xs text-muted-foreground">VSM Tool</span>
+            <span className="text-xs text-muted-foreground">Manufacturing Managmement Tool</span>
           </div>
         </Link>
       </SidebarHeader>

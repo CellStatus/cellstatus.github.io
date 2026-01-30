@@ -70,3 +70,26 @@ export const insertVsmConfigurationSchema = createInsertSchema(vsmConfigurations
 });
 export type InsertVsmConfiguration = z.infer<typeof insertVsmConfigurationSchema>;
 export type VsmConfiguration = typeof vsmConfigurations.$inferSelect;
+
+// === AUDIT FINDINGS ===
+
+export const auditFindings = pgTable("audit_findings", {
+  id: varchar("id").primaryKey(),
+  machineId: varchar("machine_id").notNull(),
+  characteristic: text("characteristic").notNull(),
+  status: text("status").default("open"),
+  partNumber: text("part_number"),
+  partName: text("part_name"),
+  charNumber: text("char_number"),
+  charName: text("char_name"),
+  charMax: text("char_max"),
+  charMin: text("char_min"),
+  tolerance: text("tolerance"),
+  measuredValue: text("measured_value").notNull(),
+  correctiveAction: text("corrective_action"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const insertAuditFindingSchema = createInsertSchema(auditFindings).omit({ id: true, createdAt: true });
+export type InsertAuditFinding = z.infer<typeof insertAuditFindingSchema>;
+export type AuditFinding = typeof auditFindings.$inferSelect;

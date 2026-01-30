@@ -2,7 +2,7 @@ import {
   type Machine, type InsertMachine,
   type MachineStatus,
   type VsmConfiguration, type InsertVsmConfiguration,
-  machines, vsmConfigurations,
+  machines, vsmConfigurations, auditFindings, InsertAuditFinding, AuditFinding,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
@@ -24,6 +24,14 @@ export interface IStorage {
   createVsmConfiguration(config: InsertVsmConfiguration): Promise<VsmConfiguration>;
   updateVsmConfiguration(id: string, updates: Partial<InsertVsmConfiguration>): Promise<VsmConfiguration | undefined>;
   deleteVsmConfiguration(id: string): Promise<boolean>;
+
+  // Audit findings
+  getAuditFindings(): Promise<AuditFinding[]>;
+  getFindingsByMachine(machineId: string): Promise<AuditFinding[]>;
+  getDistinctPartNumbers(): Promise<{ partNumber: string; partName?: string }[]>;
+  createAuditFinding(finding: InsertAuditFinding): Promise<AuditFinding>;
+  updateAuditFinding(id: string, updates: Partial<InsertAuditFinding>): Promise<AuditFinding | undefined>;
+  deleteAuditFinding(id: string): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -187,6 +195,53 @@ export class DatabaseStorage implements IStorage {
 
   async deleteVsmConfiguration(id: string): Promise<boolean> {
     const result = await db.delete(vsmConfigurations).where(eq(vsmConfigurations.id, id));
+    return !!result;
+  }
+
+  // Audit findings
+  async getAuditFindings(): Promise<AuditFinding[]> {
+    return await db.select().from(auditFindings).orderBy(auditFindings.createdAt);
+  }
+
+  async getDistinctPartNumbers(): Promise<{ partNumber: string; partName?: string }[]> {
+    const rows = await db.selectDistinct({ partNumber: auditFindings.partNumber, partName: auditFindings.partName }).from(auditFindings);
+    // filter out empty/null part numbers
+    return (rows || []).map(r => ({ partNumber: (r as any).partNumber ?? '', partName: (r as any).partName ?? undefined })).filter(r => r.partNumber && r.partNumber.length > 0);
+  }
+
+  async getFindingsByMachine(machineId: string): Promise<AuditFinding[]> {
+    return await db.select().from(auditFindings).where(eq(auditFindings.machineId, machineId)).orderBy(auditFindings.createdAt);
+  }
+
+  async createAuditFinding(finding: InsertAuditFinding): Promise<AuditFinding> {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    await db.insert(auditFindings).values({ id, ...finding, createdAt: now });
+    const result = await db.select().from(auditFindings).where(eq(auditFindings.id, id)).limit(1);
+    return result[0]!;
+  }
+
+  async updateAuditFinding(id: string, updates: Partial<InsertAuditFinding>): Promise<AuditFinding | undefined> {
+    const now = new Date().toISOString();
+    await db.update(auditFindings).set({
+      ...(updates.characteristic !== undefined ? { characteristic: updates.characteristic } : {}),
+      ...(updates.tolerance !== undefined ? { tolerance: updates.tolerance } : {}),
+      ...(updates.measuredValue !== undefined ? { measuredValue: updates.measuredValue } : {}),
+      ...(updates.correctiveAction !== undefined ? { correctiveAction: updates.correctiveAction } : {}),
+      ...(updates.status !== undefined ? { status: updates.status } : {}),
+      ...(updates.partNumber !== undefined ? { partNumber: updates.partNumber } : {}),
+      ...(updates.partName !== undefined ? { partName: updates.partName } : {}),
+      ...(updates.charNumber !== undefined ? { charNumber: updates.charNumber } : {}),
+      ...(updates.charName !== undefined ? { charName: updates.charName } : {}),
+      ...(updates.charMax !== undefined ? { charMax: updates.charMax } : {}),
+      ...(updates.charMin !== undefined ? { charMin: updates.charMin } : {}),
+    }).where(eq(auditFindings.id, id));
+    const result = await db.select().from(auditFindings).where(eq(auditFindings.id, id)).limit(1);
+    return result[0];
+  }
+
+  async deleteAuditFinding(id: string): Promise<boolean> {
+    const result = await db.delete(auditFindings).where(eq(auditFindings.id, id));
     return !!result;
   }
 }

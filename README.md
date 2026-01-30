@@ -1,6 +1,6 @@
-# CellStatus - VSM & Machine Status Tracker
+# CellStatus — Manufacturing Management Tool
 
-A manufacturing Value Stream Mapping (VSM) and machine status tracking application. Build VSM models from your machine data, analyze bottlenecks using Theory of Constraints, and simulate WIP flow through your production process.
+CellStatus is a Manufacturing Management tool for data collection and analysis. It combines machine status tracking, value stream mapping (VSM) analysis, and audit findings to help teams manage equipment, capture measurement-based issues, and improve production flow.
 
 ---
 
@@ -34,145 +34,123 @@ The core feature of the application - build and analyze your value stream:
   - Utilization calculations for each operation
   - System throughput calculation (Units Per Hour)
 
-- **WIP Simulation**:
-  - Real-time WIP flow simulation with continuous input
-  - Visual buffer levels between operations
-  - Little's Law calculation: Lead Time = WIP ÷ Throughput
-  - Track where inventory accumulates in your process
+### CellStatus
 
-- **Save & Load Configurations**:
-  - Save VSM configurations to the database
-  - Load previously saved VSMs for analysis
-  - Track status and notes for each configuration
+CellStatus is a lightweight Value Stream Mapping (VSM), machine status and audit findings tool for small-to-medium manufacturing operations. It helps teams map processes, track machine health, record measurement-based audit findings, and analyze bottlenecks using Theory of Constraints.
 
-- **Export Reports**:
-  - Generate detailed text reports with all calculations
-  - Process flow overview with step metrics
-  - Improvement recommendations based on constraints
-
-###  Modern UI/UX
-- **Responsive Design**: Works on desktop, tablet, and mobile
-- **Dark Mode**: Toggle between light and dark themes
-- **Interactive Process Flow**: Click operations to configure parameters
-- **Real-time Calculations**: Metrics update as you modify the VSM
+This README gives an overview of the app, developer setup and how to use the Audit Findings feature.
 
 ---
 
-##  Getting Started
+## Quick highlights
 
-### Prerequisites
-- **Node.js** 20 or higher
-- **PostgreSQL** database (free tier available at [Neon.tech](https://neon.tech))
-
-### Installation
-
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/rwaynewhite15/CellStatus.git
-   cd CellStatus
-   ```
-
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
-
-3. **Set up environment variables**
-   
-   Create a `.env` file in the root directory:
-   ```env
-   DATABASE_URL=postgresql://user:password@host/database
-   ```
-
-4. **Initialize the database**
-   ```bash
-   npm run db:push
-   ```
-
-5. **Start development server**
-   ```bash
-   npm run dev
-   ```
-   
-   Access the app at `http://localhost:5000`
+- Dashboard with live machine statuses and quick status updates
+- VSM Builder: model operation flow, compute throughput, and identify bottlenecks
+- Audit Findings: record measurement results per machine/part/characteristic with open/closed workflow
+- Seed script, API endpoints, and deployment script included
 
 ---
 
-##  Project Structure
+## Table of contents
+
+1. [Getting started](#getting-started)
+2. [Development workflow](#development-workflow)
+3. [Audit Findings](#audit-findings)
+4. [API Endpoints](#api-endpoints)
+5. [Project structure](#project-structure)
+6. [Deployment](#deployment)
+7. [Contributing](#contributing)
+8. [License](#license)
+
+---
+
+## Getting started
+
+Prerequisites:
+
+- Node.js 20+
+- PostgreSQL (or Neon/Postgres-compatible)
+
+Steps:
+
+```bash
+git clone https://github.com/rwaynewhite15/CellStatus.git
+cd CellStatus
+npm install
+# set DATABASE_URL in .env (see .env.example if present)
+npm run db:push    # run migrations
+npm run db:seed    # populate sample data (optional)
+npm run dev        # start backend server
+```
+
+The app serves the client and API from the Node server; frontend assets are under `client/` and server code is under `server/`.
+
+---
+
+## Development workflow
+
+- Use the included project scripts to run, build, and deploy the application. See `package.json` for the available commands.
+
+---
+
+## Audit Findings
+
+The Audit Findings feature provides a user-facing interface to capture measurement-based findings for machines. Key behaviors:
+
+- Findings are grouped by Part Number, then by Characteristic in the UI.
+- Dashboard and machine/part widgets link into the Audit Findings page and can pre-filter or expand groups for quick inspection.
+- When a Part Number filter is active the UI hides other parts so you can focus on the selected part.
+- Selecting an existing characteristic in the create/edit flow makes the characteristic/tolerance fields read-only to preserve recorded tolerances.
+
+Each finding records the machine, part number/name, characteristic, tolerance (min/max), measured value, status (open/closed), and corrective action notes.
+---
+
+## API Endpoints
+
+Relevant endpoints used by the frontend (HTTP JSON API):
+
+- `GET /api/audit-findings` — list findings
+- `POST /api/machines/:machineId/findings` — create a finding for a machine
+- `PATCH /api/findings/:id` — update a finding
+- `DELETE /api/findings/:id` — delete a finding
+- `GET /api/machines` — list machines (used to populate selectors and cards)
+- `GET /api/vsm-configurations` — list saved VSMs
+
+Note: API route files live in `server/` and are wired into `server/index.ts`.
+
+---
+
+## Project structure
 
 ```
 CellStatus/
-├── client/                 # React frontend
-│   └── src/
-│       ├── components/     # UI components
-│       ├── pages/          # Page components
-│       │   ├── dashboard-vsm.tsx   # Main dashboard
-│       │   ├── machines.tsx        # Machine management
-│       │   └── vsm-analyser.tsx    # VSM builder
-│       ├── hooks/          # Custom React hooks
-│       └── lib/            # Utilities
-├── server/                 # Express backend
-│   ├── routes.ts           # API routes
-│   ├── storage.ts          # Database operations
-│   └── db.ts               # Database connection
-├── shared/                 # Shared types
-│   └── schema.ts           # Drizzle schema
-└── migrations/             # Database migrations
+├─ client/                # React + TypeScript frontend
+│  └─ src/
+│     ├─ pages/           # pages, e.g. dashboard-vsm.tsx, audit-findings.tsx
+│     ├─ components/      # shared UI components and primitives
+│     └─ lib/             # helpers and api client
+├─ server/                # Node/Express backend and API
+│  ├─ index.ts            # server entrypoint
+│  ├─ routes.ts           # API routes
+│  └─ db.ts               # Drizzle DB connection
+├─ shared/                # shared types & schema (drizzle)
+└─ migrations/            # SQL migrations
 ```
 
 ---
 
-## ️ Tech Stack
+## Contributing
 
-**Frontend**
-- React 18 + TypeScript
-- Vite (fast build tool)
-- TanStack Query (data fetching and caching)
-- Shadcn UI + Radix UI (accessible components)
-- Tailwind CSS (utility-first styling)
-- Lucide React (icons)
+Contributions are welcome. Suggested workflow:
 
-**Backend**
-- Node.js + Express
-- TypeScript
-- Drizzle ORM (type-safe database queries)
-- PostgreSQL
+1. Fork the repo and create a feature branch
+2. Run tests / type-check locally (`npm run check`)
+3. Open a pull request with a clear description of changes
 
 ---
 
-##  VSM Concepts
+## License
 
-### Theory of Constraints
-The VSM Builder applies TOC principles:
-1. **Identify** the constraint (bottleneck operation)
-2. **Exploit** it - maximize bottleneck efficiency
-3. **Subordinate** - align all other operations to support the bottleneck
-4. **Elevate** - invest in bottleneck capacity
-5. **Repeat** - a new constraint will emerge
+MIT
+- **Behavior highlights:**
 
-### Key Calculations
-- **Effective Cycle Time** = Cycle Time + (Setup Time ÷ Batch Size)
-- **Rate** = (1 ÷ Effective CT) × Uptime%
-- **Combined Rate** (parallel machines) = Sum of individual rates
-- **Utilization** = (Bottleneck Rate ÷ Step Rate) × 100%
-- **Lead Time** = WIP ÷ Throughput (Little's Law)
-
-### Parallel Machine Processing
-When multiple machines are assigned to the same operation number, their rates ADD together. This increases capacity at that operation proportionally.
-
----
-
-##  License
-
-MIT License - see [LICENSE](./LICENSE) file for details
-
----
-
-##  Support
-
-For issues, feature requests, or questions:
-- Open an issue on [GitHub Issues](https://github.com/rwaynewhite15/CellStatus/issues)
-
----
-
-**Built for manufacturing teams to analyze and optimize production flow** 

@@ -1,3 +1,5 @@
+import { Play, Pause, Wrench, AlertTriangle, Settings, MoreVertical, Pencil, Trash2, Check, X, FileText } from "lucide-react";
+import { useLocation } from "wouter";
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -10,18 +12,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Play,
-  Pause,
-  Wrench,
-  AlertTriangle,
-  Settings,
-  MoreVertical,
-  Pencil,
-  Trash2,
-  Check,
-  X,
-} from "lucide-react";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+
 import type { Machine, MachineStatus } from "@shared/schema";
 
 interface MachineVSMCardProps {
@@ -31,6 +23,9 @@ interface MachineVSMCardProps {
   onStatusNoteChange: (machineId: string, note: string) => void;
   onDeleteMachine: (machineId: string) => void;
   isPending?: boolean;
+  findingsCount?: number;
+  openFindingsCount?: number;
+  onOpenAudit?: (machineId: string) => void;
 }
 
 const statusConfig: Record<MachineStatus, { 
@@ -78,12 +73,19 @@ export function MachineVSMCard({
   onStatusNoteChange,
   onDeleteMachine,
   isPending = false,
+  findingsCount = 0,
+  openFindingsCount = 0,
+  onOpenAudit,
 }: MachineVSMCardProps) {
   const [editingNote, setEditingNote] = useState(false);
   const [noteValue, setNoteValue] = useState(machine.statusUpdate || "");
 
+  // optional props are received via parameter destructuring above
+
   const config = statusConfig[machine.status];
   const StatusIcon = config.icon;
+
+  const [, setLocation] = useLocation();
 
   const handleSaveNote = () => {
     onStatusNoteChange(machine.id, noteValue);
@@ -110,6 +112,28 @@ export function MachineVSMCard({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => onOpenAudit && onOpenAudit(machine.id)}>
+                {typeof openFindingsCount === 'number' && openFindingsCount > 0 ? (
+                  <Badge variant="secondary" className="mr-2">{openFindingsCount}</Badge>
+                ) : typeof findingsCount === 'number' && findingsCount > 0 ? (
+                  <Badge variant="secondary" className="mr-2">{findingsCount}</Badge>
+                ) : null}
+                Open Findings
+              </DropdownMenuItem>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div>
+                    <DropdownMenuItem onClick={() => setLocation(`/audit-findings?machineId=${encodeURIComponent(machine.id)}&status=open`)}>
+                      <FileText className="mr-2 h-4 w-4" />
+                      View Open Findings
+                    </DropdownMenuItem>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  {typeof openFindingsCount === 'number' && openFindingsCount > 0 ? `${openFindingsCount} open` : 'No open findings'}
+                </TooltipContent>
+              </Tooltip>
+              <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => setEditingNote(true)}>
                 <Pencil className="mr-2 h-4 w-4" />
                 Edit Note

@@ -33,6 +33,7 @@ import {
   GitBranch,
   ArrowRight,
   TrendingUp,
+  Bell,
   Trash2,
   Pencil,
   Check,
@@ -154,6 +155,7 @@ function renderOperationNames(stationsJson: unknown) {
 
 export default function Dashboard() {
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
   const [machineDialogOpen, setMachineDialogOpen] = useState(false);
   const [editingMachine, setEditingMachine] = useState<Machine | null>(null);
@@ -172,6 +174,8 @@ export default function Dashboard() {
   const { data: vsmConfigurations = [], isLoading: vsmLoading } = useQuery<VsmConfiguration[]>({
     queryKey: ["/api/vsm-configurations"],
   });
+
+  
 
   // Mutations
   const createMachineMutation = useMutation({
@@ -274,6 +278,119 @@ export default function Dashboard() {
     return { grouped, sortedKeys };
   }, [filteredMachines]);
 
+  // Fetch audit findings and group by machine
+  const { data: auditFindings = [], isLoading: findingsLoading } = useQuery<any[]>({
+    queryKey: ['/api/audit-findings'],
+    queryFn: async () => apiRequest('GET', '/api/audit-findings'),
+  });
+
+  const findingsByMachine = useMemo(() => {
+    const map: Record<string, any[]> = {};
+    (auditFindings || []).forEach(f => {
+      if (!map[f.machineId]) map[f.machineId] = [];
+      map[f.machineId].push(f);
+    });
+    return map;
+  }, [auditFindings]);
+
+  const openClosedCounts = useMemo(() => {
+    const open = (auditFindings || []).filter(f => (f.status || 'open') === 'open').length;
+    const closed = (auditFindings || []).filter(f => (f.status || 'open') === 'closed').length;
+    return { open, closed };
+  }, [auditFindings]);
+
+  const topCharacteristics = useMemo(() => {
+    // Map by characteristic key (charNumber or charName) and store sample part info
+    const map = new Map<string, { key: string; charNumber: string; charName: string; partNumber: string; partName: string; count: number }>();
+    (auditFindings || []).forEach(f => {
+      const charNumber = ((f as any).charNumber || '').toString();
+      const charName = (f as any).charName || f.characteristic || '';
+      const partNumber = ((f as any).partNumber || '').toString();
+      const partName = (f as any).partName || '';
+      const key = charNumber || charName || '(unknown)';
+      const cur = map.get(key) || { key, charNumber: charNumber || '', charName: charName || '', partNumber: partNumber || '', partName: partName || '', count: 0 };
+      cur.count += 1;
+      // prefer to keep first-seen part info (so we have a representative part)
+      if (!cur.partNumber && partNumber) cur.partNumber = partNumber;
+      if (!cur.partName && partName) cur.partName = partName;
+      if (!cur.charName && charName) cur.charName = charName;
+      if (!cur.charNumber && charNumber) cur.charNumber = charNumber;
+      map.set(key, cur);
+    });
+    return Array.from(map.values()).sort((a, b) => b.count - a.count).slice(0, 3);
+  }, [auditFindings]);
+
+  const totalFindings = (auditFindings || []).length;
+
+  const findingsLast7Days = useMemo(() => {
+    const now = Date.now();
+    const cutoff = now - 7 * 24 * 60 * 60 * 1000;
+    return (auditFindings || []).filter(f => {
+      try {
+        return new Date((f as any).createdAt).getTime() >= cutoff;
+      } catch (e) {
+        return false;
+      }
+    }).length;
+  }, [auditFindings]);
+
+  const machinesWithMostOpen = useMemo(() => {
+    // Compute total open findings per machine and distinct characteristic count
+    const totalMap = new Map<string, number>();
+    const charsMap = new Map<string, Set<string>>();
+    (auditFindings || []).forEach(f => {
+      if ((f.status || 'open') !== 'open') return;
+      const mid = f.machineId || 'unknown';
+      totalMap.set(mid, (totalMap.get(mid) || 0) + 1);
+      const key = ((f as any).charNumber || (f as any).charName || f.characteristic || '(unknown)').toString();
+      if (!charsMap.has(mid)) charsMap.set(mid, new Set());
+      charsMap.get(mid)!.add(key);
+    });
+    const arr = Array.from(totalMap.entries()).map(([id, count]) => {
+      const m = machines.find(m => m.id === id);
+      const distinct = charsMap.get(id) ? charsMap.get(id)!.size : 0;
+      return { id, count, distinct, name: m?.name || id, machineIdValue: m?.machineId || id };
+    });
+    arr.sort((a, b) => b.count - a.count);
+    return arr.slice(0, 3);
+  }, [auditFindings, machines]);
+
+  const topParts = useMemo(() => {
+    const map = new Map<string, { key: string; name: string; count: number }>();
+    (auditFindings || []).forEach(f => {
+      const pn = ((f as any).partNumber || '').toString();
+      const name = (f as any).partName || '';
+      const key = pn || name || '(unknown)';
+      const cur = map.get(key) || { key, name: name || key, count: 0 };
+      cur.count += 1;
+      map.set(key, cur);
+    });
+    return Array.from(map.values()).sort((a, b) => b.count - a.count).slice(0, 3);
+  }, [auditFindings]);
+
+  const [activeAuditMachine, setActiveAuditMachine] = useState<string | null>(null);
+  const [auditCharacteristic, setAuditCharacteristic] = useState('');
+  const [auditMeasured, setAuditMeasured] = useState('');
+
+  const createFindingMutation = useMutation({
+    mutationFn: (payload: any) => apiRequest('POST', `/api/machines/${payload.machineId}/findings`, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/audit-findings'] });
+      setActiveAuditMachine(null);
+      setAuditCharacteristic('');
+      setAuditMeasured('');
+      toast({ title: 'Audit finding saved' });
+    },
+    onError: () => toast({ title: 'Failed to save finding', variant: 'destructive' }),
+  });
+
+  const openAuditFor = (machineId: string) => setActiveAuditMachine(machineId);
+  const closeAudit = () => setActiveAuditMachine(null);
+  const saveAudit = async () => {
+    if (!activeAuditMachine) return;
+    await createFindingMutation.mutateAsync({ machineId: activeAuditMachine, characteristic: auditCharacteristic, measuredValue: auditMeasured });
+  };
+
   const toggleCell = (cellName: string) => {
     setExpandedCells(prev => {
       const newSet = new Set(prev);
@@ -312,54 +429,105 @@ export default function Dashboard() {
             <Factory className="h-10 w-10 text-primary" />
             <div>
               <h1 className="text-2xl font-bold">
-                Value Stream Mapping Dashboard
+                Manufacturing Management Dashboard
               </h1>
               <p className="text-sm text-muted-foreground mt-1">
-                Manage machines and build value stream maps
+                Manage machines, audits, and value stream maps
               </p>
             </div>
           </div>
-          <Link href="/vsm-builder">
-            <Button className="gap-2">
-              <GitBranch className="h-4 w-4" />
-              Open VSM Builder
-            </Button>
-          </Link>
+          
         </div>
       </div>
 
       <div className="flex-1 p-6 space-y-6">
         {/* Summary Cards */}
-        <div className="grid gap-4 grid-cols-1 md:grid-cols-4">
+        <div className="grid gap-4 grid-cols-1 md:grid-cols-6">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                Total Machines
+                Total Findings
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">{machines.length}</div>
+              <div className="text-3xl font-bold">{totalFindings}</div>
+              <p className="text-xs text-muted-foreground">all-time findings</p>
             </CardContent>
           </Card>
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                Running
+                Last 7 Days
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold text-green-600">{runningMachines}</div>
+              <div className="text-3xl font-bold text-amber-600">{findingsLast7Days}</div>
+              <p className="text-xs text-muted-foreground">findings in last 7 days</p>
             </CardContent>
           </Card>
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                VSM Ready
+                Closed Findings
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold text-blue-600">{machinesWithCycleTime}</div>
-              <p className="text-xs text-muted-foreground">with cycle time set</p>
+              <div className="text-3xl font-bold text-green-600">{openClosedCounts.closed}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Most Findings by Machine
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {machinesWithMostOpen.length === 0 ? (
+                <div className="text-sm text-muted-foreground">No open findings</div>
+              ) : (
+                <div className="space-y-1">
+                  {machinesWithMostOpen.map(m => (
+                    <button key={m.id} onClick={() => setLocation(`/audit-findings?machineId=${encodeURIComponent(m.id)}`)} className="w-full flex items-center justify-between text-left">
+                      <div className="text-sm">{m.name}{m.machineIdValue ? ` (...${String(m.machineIdValue).slice(-3)})` : ''}</div>
+                      <div className="text-right">
+                        <div className="font-bold text-lg">{m.count}</div>
+                        <div className="text-xs text-muted-foreground">Findings</div>
+                        {typeof m.distinct === 'number' && (
+                          <div className="text-[10px] text-muted-foreground">{m.distinct} unique characteristic{m.distinct === 1 ? '' : 's'}</div>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Most Findings by Part
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {topParts.length === 0 ? (
+                <div className="text-sm text-muted-foreground">No parts found</div>
+              ) : (
+                <div className="space-y-1">
+                  {topParts.map(p => (
+                    <button key={p.key} onClick={() => setLocation(`/audit-findings?partNumber=${encodeURIComponent(p.key)}`)} className="w-full flex items-center justify-between text-left">
+                      <div className="min-w-0">
+                        <div className="text-sm truncate">{p.key}</div>
+                        {p.name && (
+                          <div className="text-xs text-muted-foreground truncate">{p.name}</div>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <div className="font-bold text-lg">{p.count}</div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
           <Card>
@@ -425,7 +593,8 @@ export default function Dashboard() {
                         Click to view in VSM Builder
                       </div>
                     </CardContent>
-                  </Link>
+                    </Link>
+                    {/* Audit findings preview removed from VSM cards per design; shown only on machine cards */}
                   
                   {/* Cell Status at Bottom - Editable */}
                   <div className="px-6 pb-4">
@@ -483,6 +652,43 @@ export default function Dashboard() {
             </div>
           </div>
         )}
+
+        {/* Problem Characteristics */}
+        <div>
+          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <Bell className="h-5 w-5" />
+            Problem Characteristics
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {topCharacteristics.length === 0 ? (
+              <Card>
+                <CardContent>
+                  <div className="text-sm text-muted-foreground">No findings yet</div>
+                </CardContent>
+              </Card>
+            ) : topCharacteristics.map(tc => (
+              <Card key={tc.key} className="cursor-pointer hover:shadow-lg transition" onClick={() => setLocation(`/audit-findings?char=${encodeURIComponent(tc.key)}`)}>
+                <CardHeader>
+                  <CardTitle className="text-sm font-medium">{tc.charName ? tc.charName : tc.key}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Part</div>
+                      <div className="text-sm font-medium truncate">{tc.partNumber || '-'}{tc.partName ? ` - ${tc.partName}` : ''}</div>
+                      <div className="text-[10px] text-muted-foreground uppercase tracking-wider mt-3">Characteristic</div>
+                      <div className="text-sm truncate">{tc.charNumber || '-'}{tc.charName ? ` - ${tc.charName}` : ''}</div>
+                    </div>
+                    <div className="flex flex-col items-end">
+                      <div className="text-3xl font-bold">{tc.count}</div>
+                      <div className="text-xs text-muted-foreground">Findings</div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
 
         {/* Machines Section */}
         <div>
@@ -588,6 +794,9 @@ export default function Dashboard() {
                                 onStatusNoteChange={handleStatusNoteChange}
                                 onDeleteMachine={handleDeleteMachine}
                                 isPending={updateMachineMutation.isPending || updateStatusNoteMutation.isPending}
+                                findingsCount={(findingsByMachine[machine.id] || []).length}
+                                openFindingsCount={((findingsByMachine[machine.id] || []) as any[]).filter(f => (f.status || 'open') === 'open').length}
+                                onOpenAudit={openAuditFor}
                               />
                             ))}
                           </div>

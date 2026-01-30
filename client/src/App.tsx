@@ -10,6 +10,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import Dashboard from "@/pages/dashboard-vsm";
 import Machines from "@/pages/machines";
 import VSMBuilder from "@/pages/vsm-builder";
+import AuditFindings from "@/pages/audit-findings";
 import NotFound from "@/pages/not-found";
 
 
@@ -65,6 +66,7 @@ function AppContent() {
               <Route path="/" component={Dashboard} />
               <Route path="/machines" component={Machines} />
               <Route path="/vsm-builder" component={VSMBuilder} />
+              <Route path="/audit-findings" component={AuditFindings} />
               <Route component={NotFound} />
             </Switch>
           </main>

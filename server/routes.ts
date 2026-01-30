@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
-import { insertMachineSchema, insertVsmConfigurationSchema, machineStatuses } from "@shared/schema";
+import { insertMachineSchema, insertVsmConfigurationSchema, machineStatuses, insertAuditFindingSchema } from "@shared/schema";
 import { z } from "zod";
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
@@ -116,6 +116,83 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (error) {
       console.error("Error deleting machine:", error);
       res.status(500).json({ message: "Failed to delete machine" });
+    }
+  });
+
+  // ============ AUDIT FINDINGS ROUTES ============
+
+  app.get('/api/audit-findings', async (_req, res) => {
+    try {
+      const findings = await storage.getAuditFindings();
+      res.json(findings);
+    } catch (err) {
+      console.error('Error fetching audit findings', err);
+      res.status(500).json({ message: 'Failed to fetch audit findings' });
+    }
+  });
+
+  // Return distinct part numbers found in audit findings
+  app.get('/api/parts', async (_req, res) => {
+    try {
+      const parts = await storage.getDistinctPartNumbers();
+      res.json(parts);
+    } catch (err) {
+      console.error('Error fetching part numbers', err);
+      res.status(500).json({ message: 'Failed to fetch part numbers' });
+    }
+  });
+
+  app.get('/api/machines/:id/findings', async (req, res) => {
+    try {
+      const findings = await storage.getFindingsByMachine(req.params.id);
+      res.json(findings);
+    } catch (err) {
+      console.error('Error fetching findings for machine', err);
+      res.status(500).json({ message: 'Failed to fetch findings' });
+    }
+  });
+
+  app.post('/api/machines/:id/findings', async (req, res) => {
+    try {
+      const payload = { ...req.body, machineId: req.params.id };
+      const validated = insertAuditFindingSchema.parse(payload);
+      const created = await storage.createAuditFinding(validated);
+      res.status(201).json(created);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Invalid audit finding', details: err.errors });
+      }
+      console.error('Error creating audit finding', err);
+      res.status(500).json({ message: 'Failed to create audit finding' });
+    }
+  });
+
+  // Update an audit finding
+  app.patch('/api/findings/:id', async (req, res) => {
+    try {
+      const partial = insertAuditFindingSchema.partial();
+      const validated = partial.parse(req.body);
+      const updated = await storage.updateAuditFinding(req.params.id, validated as any);
+      if (!updated) return res.status(404).json({ message: 'Audit finding not found' });
+      res.json(updated);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Invalid audit finding update', details: err.errors });
+      }
+      console.error('Error updating audit finding', err);
+      res.status(500).json({ message: 'Failed to update audit finding' });
+    }
+  });
+
+  // Delete an audit finding
+  app.delete('/api/findings/:id', async (req, res) => {
+    try {
+      const success = await storage.deleteAuditFinding(req.params.id);
+      if (!success) return res.status(404).json({ message: 'Audit finding not found' });
+      res.json({ success: true });
+    } catch (err) {
+      console.error('Error deleting audit finding', err);
+      res.status(500).json({ message: 'Failed to delete audit finding' });
     }
   });
 

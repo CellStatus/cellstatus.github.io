@@ -1184,7 +1184,7 @@ export default function VsmBuilder() {
   if (!id) {
     // List view: show saved VSMs and create new
     return (
-      <div className="p-6 h-full overflow-auto">
+      <div className="p-6 h-full overflow-auto hide-scrollbar">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">Saved Value Streams</h2>
           <Link href={`/vsm-builder?id=new`}>
@@ -1305,7 +1305,7 @@ export default function VsmBuilder() {
     }
 
   return (
-    <div className="p-6 h-full overflow-auto">
+    <div className="p-6 h-full overflow-auto hide-scrollbar">
       {isLoading ? (
         <div className="flex items-center justify-center h-32">
           <div className="text-muted-foreground">Loading VSM...</div>
@@ -1890,8 +1890,8 @@ export default function VsmBuilder() {
             <button onClick={() => setShowRaw(s => !s)} className="text-xs text-muted-foreground underline">
               {showRaw ? 'Hide' : 'Show'} raw JSON
             </button>
-            {showRaw && (
-              <pre className="mt-2 max-h-48 overflow-auto text-xs bg-muted/50 p-2 rounded text-left">{JSON.stringify(vsm.stationsJson, null, 2)}</pre>
+              {showRaw && (
+              <pre className="mt-2 max-h-48 overflow-auto hide-scrollbar text-xs bg-muted/50 p-2 rounded text-left">{JSON.stringify(vsm.stationsJson, null, 2)}</pre>
             )}
           </div>
         </div>
