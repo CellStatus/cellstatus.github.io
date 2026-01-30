@@ -23,9 +23,30 @@ const allowedOrigins = [
   "http://localhost:5000", // Local production test
 ];
 
+// Respond to preflight OPTIONS for /api/* early with CORS headers
+app.options("/api/*", (req, res) => {
+  const origin = req.headers.origin as string | undefined;
+  if (origin && allowedOrigins.some((allowed) => origin.startsWith(allowed))) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type,Authorization,Cache-Control,Pragma,x-api-password",
+    );
+  }
+  res.status(204).end();
+});
+
 // Password protection middleware for all API routes
 const API_PASSWORD = process.env.API_PASSWORD || "changeme"; // Set your password here or in .env
 app.use("/api", (req, res, next) => {
+  // Allow CORS preflight requests through so the browser can see
+  // Access-Control-Allow-* headers before attempting the real request.
+  if (req.method === "OPTIONS") {
+    return next();
+  }
+
   const password = req.headers["x-api-password"];
   if (!password || password !== API_PASSWORD) {
     return res.status(401).json({ message: "Unauthorized: Invalid or missing API password." });
