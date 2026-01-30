@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+
 export default function PasswordScreen({ onSuccess }: { onSuccess: (password: string) => void }) {
   const [value, setValue] = useState("");
   const [error, setError] = useState("");
@@ -10,7 +12,8 @@ export default function PasswordScreen({ onSuccess }: { onSuccess: (password: st
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/health", {
+      const healthUrl = API_BASE ? `${API_BASE}/api/health` : "/api/health";
+      const res = await fetch(healthUrl, {
         method: "GET",
         headers: {
           "x-api-password": val,
