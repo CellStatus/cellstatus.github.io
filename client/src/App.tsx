@@ -1,3 +1,4 @@
+import React from "react";
 import { Switch, Route, Router } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -11,11 +12,42 @@ import Machines from "@/pages/machines";
 import VSMBuilder from "@/pages/vsm-builder";
 import NotFound from "@/pages/not-found";
 
+
+import PasswordScreen from "@/pages/password-screen";
+import { setApiPassword } from "./lib/queryClient";
+
+
 function AppContent() {
+  const [authenticated, setAuthenticated] = React.useState(false);
+  const [loading, setLoading] = React.useState(true);
   const style = {
     "--sidebar-width": "16rem",
     "--sidebar-width-icon": "3rem",
   };
+
+  React.useEffect(() => {
+    const pw = sessionStorage.getItem("apiPassword");
+    console.log("[App] Restoring password from sessionStorage:", pw);
+    if (pw) {
+      setApiPassword(pw);
+      setAuthenticated(true);
+    } else {
+      setAuthenticated(false);
+    }
+    setLoading(false);
+  }, []);
+
+  // Store password and authenticate
+  const handlePasswordSuccess = (password: string) => {
+    setApiPassword(password);
+    sessionStorage.setItem("apiPassword", password);
+    setAuthenticated(true);
+  };
+
+  if (loading) return null;
+  if (!authenticated) {
+    return <PasswordScreen onSuccess={handlePasswordSuccess} />;
+  }
 
   return (
     <SidebarProvider style={style as React.CSSProperties}>

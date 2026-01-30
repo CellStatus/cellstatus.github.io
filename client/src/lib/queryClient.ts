@@ -11,6 +11,18 @@ function buildUrl(path: string) {
   return `${API_BASE}${normalized}`;
 }
 
+
+// Store API password in memory (set after login)
+let apiPassword: string | null = null;
+export function setApiPassword(pw: string) {
+  apiPassword = pw;
+  console.log("[setApiPassword] Password set:", pw);
+}
+function getApiPassword() {
+  console.log("[getApiPassword] Current password:", apiPassword);
+  return apiPassword;
+}
+
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
@@ -28,9 +40,17 @@ export async function apiRequest<T = any>(
   let attempt = 0;
   let lastError: Error | null = null;
   while (attempt < maxAttempts) {
+    const headers: Record<string, string> = data ? { "Content-Type": "application/json" } : {};
+    const pw = getApiPassword();
+    if (!pw) {
+      console.warn("API password missing, blocking request and forcing login.");
+      throw new Error("Not authenticated: API password missing");
+    }
+    headers["x-api-password"] = pw;
+    console.log("[apiRequest] Sending x-api-password:", pw);
     const res = await fetch(buildUrl(url), {
       method,
-      headers: data ? { "Content-Type": "application/json" } : {},
+      headers,
       body: data ? JSON.stringify(data) : undefined,
       credentials: "include",
       cache: "no-store",
@@ -86,10 +106,21 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const res = await fetch(buildUrl(queryKey.join("/") as string), {
+    const url = queryKey.join("/") as string;
+    const pw = getApiPassword();
+    if (!pw) {
+      console.warn("getQueryFn: API password missing");
+      throw new Error("Not authenticated: API password missing");
+    }
+
+    const res = await fetch(buildUrl(url), {
       credentials: "include",
       cache: "no-store",
-      headers: { "Pragma": "no-cache", "Cache-Control": "no-store" },
+      headers: {
+        "Pragma": "no-cache",
+        "Cache-Control": "no-store",
+        "x-api-password": pw,
+      },
     });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {

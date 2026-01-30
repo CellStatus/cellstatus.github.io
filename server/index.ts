@@ -23,6 +23,16 @@ const allowedOrigins = [
   "http://localhost:5000", // Local production test
 ];
 
+// Password protection middleware for all API routes
+const API_PASSWORD = process.env.API_PASSWORD || "changeme"; // Set your password here or in .env
+app.use("/api", (req, res, next) => {
+  const password = req.headers["x-api-password"];
+  if (!password || password !== API_PASSWORD) {
+    return res.status(401).json({ message: "Unauthorized: Invalid or missing API password." });
+  }
+  next();
+});
+
 app.use(
   cors({
     origin: (origin, callback) => {
