@@ -19,7 +19,7 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from "@/components/ui/alert-dialog";
-export default function AuditFindings() {
+export default function SpcData() {
   const { toast } = useToast();
   const [openNew, setOpenNew] = useState(false);
   const [selMachine, setSelMachine] = useState<string | null>(null);
@@ -47,7 +47,7 @@ export default function AuditFindings() {
   const [expandedChars, setExpandedChars] = useState<Set<string>>(new Set());
 
   // Read query params when the route changes so the dashboard (or other places)
-  // can link to `/audit-findings?machineId=...` or `/audit-findings?char=...`.
+  // can link to `/spc-data?machineId=...` or `/spc-data?char=...`.
   useEffect(() => {
     try {
       const u = new URL(window.location.href);
@@ -76,10 +76,10 @@ export default function AuditFindings() {
     setExpandedChars(new Set());
     setFilterPartNumber(null);
     try {
-      window.history.replaceState({}, '', '/audit-findings');
+      window.history.replaceState({}, '', '/spc-data');
     } catch (e) {
       // fallback to router navigation
-      setLocation('/audit-findings');
+      setLocation('/spc-data');
     }
   };
 
@@ -229,9 +229,9 @@ export default function AuditFindings() {
       setPlusMinus("");
       setMeasured("");
       setCorrectiveAction("");
-      toast({ title: 'Audit finding created' });
+      toast({ title: 'SPC record created' });
     },
-    onError: () => toast({ title: 'Failed to create finding', variant: 'destructive' }),
+    onError: () => toast({ title: 'Failed to create SPC record', variant: 'destructive' }),
   });
 
   // Edit / Delete mutations
@@ -245,18 +245,18 @@ export default function AuditFindings() {
       setPlusMinus("");
       setMeasured("");
       setCorrectiveAction("");
-      toast({ title: 'Audit finding updated' });
+      toast({ title: 'SPC record updated' });
     },
-    onError: () => toast({ title: 'Failed to update finding', variant: 'destructive' }),
+    onError: () => toast({ title: 'Failed to update SPC record', variant: 'destructive' }),
   });
 
   const deleteFindingMutation = useMutation({
     mutationFn: (id: string) => apiRequest('DELETE', `/api/findings/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/audit-findings'] });
-      toast({ title: 'Audit finding deleted' });
+      toast({ title: 'SPC record deleted' });
     },
-    onError: () => toast({ title: 'Failed to delete finding', variant: 'destructive' }),
+    onError: () => toast({ title: 'Failed to delete SPC record', variant: 'destructive' }),
   });
 
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -345,16 +345,16 @@ export default function AuditFindings() {
     <div className="p-6">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h2 className="text-lg font-semibold">Audit Findings</h2>
+          <h2 className="text-lg font-semibold">SPC Data</h2>
           {filterMachineId && (
-            <div className="text-sm text-muted-foreground">Showing findings for: {machineById[filterMachineId]?.name || filterMachineId} <Button variant="ghost" size="sm" onClick={clearFilters}>Clear</Button></div>
+            <div className="text-sm text-muted-foreground">Showing SPC data for: {machineById[filterMachineId]?.name || filterMachineId} <Button variant="ghost" size="sm" onClick={clearFilters}>Clear</Button></div>
           )}
           {!filterMachineId && filterPartNumber && (
-            <div className="text-sm text-muted-foreground">Showing findings for part: {filterPartNumber}{filterPartName ? ` — ${filterPartName}` : ''} <Button variant="ghost" size="sm" onClick={clearFilters}>Clear</Button></div>
+            <div className="text-sm text-muted-foreground">Showing SPC data for part: {filterPartNumber}{filterPartName ? ` — ${filterPartName}` : ''} <Button variant="ghost" size="sm" onClick={clearFilters}>Clear</Button></div>
           )}
         </div>
         <div>
-          <Button onClick={() => openNewFor()}>New Finding</Button>
+          <Button onClick={() => openNewFor()}>New SPC Record</Button>
         </div>
       </div>
       <div className="mb-4">
@@ -363,7 +363,7 @@ export default function AuditFindings() {
       <div className="grid gap-4 grid-cols-1">
         {entriesToShow.length === 0 ? (
           <Card>
-            <CardContent>No audit findings recorded.</CardContent>
+            <CardContent>No SPC data recorded.</CardContent>
           </Card>
         ) : (
           entriesToShow.map(([partNumber, partItems]) => {
@@ -388,7 +388,7 @@ export default function AuditFindings() {
                     <div className="flex items-center justify-between mb-2 cursor-pointer">
                       <h3 className="text-lg font-semibold">{partNumber}{partName ? ` — ${partName}` : ''}</h3>
                       <div className="flex items-center gap-2">
-                        <span className="text-sm text-muted-foreground">{charCount} chars • {totalFindings} findings</span>
+                        <span className="text-sm text-muted-foreground">{charCount} chars • {totalFindings} records</span>
                       </div>
                     </div>
                   </CollapsibleTrigger>
@@ -482,7 +482,7 @@ export default function AuditFindings() {
                                             <td className="p-2 text-right">
                                               <div className="inline-flex gap-2 items-center">
                                                 <button
-                                                  aria-label="Edit finding"
+                                                  aria-label="Edit SPC record"
                                                   title="Edit"
                                                   onClick={() => startEdit(it)}
                                                   className={`${hoveredRowId === it.id ? 'opacity-100' : 'opacity-0 pointer-events-none'} transition-opacity h-6 w-6 flex items-center justify-center rounded`}
@@ -490,7 +490,7 @@ export default function AuditFindings() {
                                                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 21v-3a4 4 0 0 1 4-4h3"/><path d="M20.7 7.3a1 1 0 0 0 0-1.4l-2.6-2.6a1 1 0 0 0-1.4 0L7 12v3h3L20.7 7.3z"/></svg>
                                                 </button>
                                                 <button
-                                                  aria-label="Delete finding"
+                                                  aria-label="Delete SPC record"
                                                   title="Delete"
                                                   onClick={() => { setConfirmDeleteId(it.id); setConfirmOpen(true); }}
                                                   className={`${hoveredRowId === it.id ? 'opacity-100' : 'opacity-0 pointer-events-none'} transition-opacity h-6 w-6 flex items-center justify-center rounded`}
@@ -608,11 +608,11 @@ export default function AuditFindings() {
         </div>
       )}
 
-      {/* New Finding Modal */}
+      {/* New SPC Record Modal */}
       {openNew && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-background p-4 sm:p-6 rounded shadow-lg w-full max-w-full sm:max-w-md mx-3 sm:mx-0 max-h-[85vh] overflow-y-auto">
-            <h3 className="text-lg font-semibold mb-2">New Audit Finding</h3>
+            <h3 className="text-lg font-semibold mb-2">New SPC Record</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="md:col-span-1">
                 <label className="text-xs text-muted-foreground">Machine</label>
@@ -854,8 +854,8 @@ export default function AuditFindings() {
       <AlertDialog open={confirmOpen} onOpenChange={(v) => { if (!v) { setConfirmDeleteId(null); } setConfirmOpen(v); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete audit finding</AlertDialogTitle>
-            <AlertDialogDescription>Are you sure you want to delete this audit finding? This action cannot be undone.</AlertDialogDescription>
+            <AlertDialogTitle>Delete SPC record</AlertDialogTitle>
+            <AlertDialogDescription>Are you sure you want to delete this SPC record? This action cannot be undone.</AlertDialogDescription>
           </AlertDialogHeader>
           <div className="flex justify-end gap-2 mt-4">
             <AlertDialogCancel onClick={() => setConfirmOpen(false)}>Cancel</AlertDialogCancel>

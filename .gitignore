@@ -14,3 +14,4 @@ vite.config.ts.*
 !.env.example
 !client/.env.development
 !client/.env.production
+.vs/

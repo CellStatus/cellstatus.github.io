@@ -10,7 +10,8 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import Dashboard from "@/pages/dashboard-vsm";
 import Machines from "@/pages/machines";
 import VSMBuilder from "@/pages/vsm-builder";
-import AuditFindings from "@/pages/audit-findings";
+import SimpleVSM from "@/pages/simple-vsm";
+import SpcData from "@/pages/spc-data";
 import NotFound from "@/pages/not-found";
 
 
@@ -66,7 +67,8 @@ function AppContent() {
               <Route path="/" component={Dashboard} />
               <Route path="/machines" component={Machines} />
               <Route path="/vsm-builder" component={VSMBuilder} />
-              <Route path="/audit-findings" component={AuditFindings} />
+              <Route path="/simple-vsm" component={SimpleVSM} />
+              <Route path="/spc-data" component={SpcData} />
               <Route component={NotFound} />
             </Switch>
           </main>

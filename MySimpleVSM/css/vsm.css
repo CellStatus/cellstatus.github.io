@@ -1,0 +1,318 @@
+/* ============================================================
+   SimpleVSM — Value Stream Map Visual Elements
+   ============================================================ */
+
+/* ─── Supplier / Customer Icons ─── */
+.vsm-entity {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  z-index: 10;
+}
+.vsm-entity-icon {
+  width: 90px;
+  height: 70px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.vsm-entity-icon svg {
+  width: 100%;
+  height: 100%;
+}
+.vsm-entity-label {
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  color: var(--text);
+  max-width: 110px;
+}
+.vsm-entity-sublabel {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+/* ─── Process Box ─── */
+.vsm-process {
+  position: absolute;
+  z-index: 10;
+}
+
+.vsm-process-box {
+  width: 150px;
+  min-height: 50px;
+  background: #fff;
+  border: 2px solid #334155;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 6px;
+  cursor: default;
+  transition: box-shadow 0.15s, border-color 0.15s;
+}
+.vsm-process-box:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+}
+
+.vsm-process.bottleneck .vsm-process-box {
+  border-color: var(--bottleneck);
+  background: #fef2f2;
+}
+.vsm-process.bottleneck .vsm-process-name {
+  color: var(--bottleneck);
+}
+
+.vsm-process-name {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text);
+  text-align: center;
+  line-height: 1.2;
+}
+.vsm-process-step {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-top: 1px;
+}
+
+/* ─── Data Box (below process box) ─── */
+.vsm-data-box {
+  width: 150px;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-top: 2px solid #334155;
+  margin-top: -1px;
+  padding: 5px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.vsm-data-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+.vsm-data-key {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.vsm-data-val {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.vsm-process.bottleneck .vsm-data-box {
+  border-color: #fca5a5;
+  border-top-color: var(--bottleneck);
+}
+
+/* ─── Inventory Triangle ─── */
+.vsm-inventory {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  z-index: 10;
+}
+.vsm-inventory svg {
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.1));
+}
+.vsm-inventory-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--warning);
+  text-align: center;
+}
+
+/* ─── Material Flow Arrows ─── */
+.vsm-arrow {
+  position: absolute;
+  z-index: 5;
+}
+.vsm-arrow line, .vsm-arrow polyline, .vsm-arrow path {
+  stroke: #334155;
+  stroke-width: 2;
+  fill: none;
+}
+.vsm-arrow polygon {
+  fill: #334155;
+  stroke: none;
+}
+
+/* ─── Push Arrow (striped) ─── */
+.vsm-push-arrow {
+  position: absolute;
+  z-index: 6;
+}
+
+/* ─── Information Flow (dashed) ─── */
+.vsm-info-flow {
+  position: absolute;
+  z-index: 4;
+}
+.vsm-info-flow line, .vsm-info-flow path {
+  stroke: #94a3b8;
+  stroke-width: 1.5;
+  stroke-dasharray: 6 3;
+  fill: none;
+}
+
+/* ─── Production Control Box ─── */
+.vsm-control {
+  position: absolute;
+  z-index: 10;
+}
+.vsm-control-box {
+  background: #fff;
+  border: 2px solid #64748b;
+  border-radius: 4px;
+  padding: 10px 18px;
+  text-align: center;
+}
+.vsm-control-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* ─── Timeline Ladder ─── */
+.vsm-timeline {
+  position: absolute;
+  z-index: 10;
+}
+
+.vsm-timeline-segment {
+  position: absolute;
+  border: 1.5px solid #64748b;
+  background: transparent;
+}
+.vsm-timeline-segment.wait {
+  border-bottom: none;
+  background: #f8fafc;
+}
+.vsm-timeline-segment.process {
+  border-top: none;
+  background: #eff6ff;
+}
+
+.vsm-timeline-value {
+  position: absolute;
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.vsm-timeline-value.wait-value {
+  color: #94a3b8;
+}
+.vsm-timeline-value.process-value {
+  color: var(--primary);
+}
+
+/* ─── Timeline Totals ─── */
+.vsm-timeline-totals {
+  position: absolute;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.vsm-timeline-total {
+  font-size: 11px;
+  font-weight: 700;
+}
+.vsm-timeline-total .label {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.vsm-timeline-total .value {
+  color: var(--text);
+}
+
+/* ─── Connector lines (SVG overlaid) ─── */
+.vsm-connectors {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* ─── Bottleneck Badge ─── */
+.vsm-bottleneck-badge {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  background: var(--bottleneck);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  z-index: 15;
+}
+
+/* ─── Shift Info ─── */
+.vsm-shift-info {
+  position: absolute;
+  z-index: 10;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: rgba(255,255,255,0.9);
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+/* ─── Tooltip ─── */
+.vsm-tooltip {
+  position: absolute;
+  z-index: 100;
+  background: var(--toolbar-bg);
+  color: #fff;
+  font-size: 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.vsm-tooltip.visible {
+  opacity: 1;
+}
+
+/* ─── Animations ─── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.vsm-process, .vsm-entity, .vsm-inventory, .vsm-timeline {
+  animation: fadeIn 0.35s ease-out both;
+}
+.vsm-process:nth-child(1)  { animation-delay: 0.03s; }
+.vsm-process:nth-child(2)  { animation-delay: 0.06s; }
+.vsm-process:nth-child(3)  { animation-delay: 0.09s; }
+.vsm-process:nth-child(4)  { animation-delay: 0.12s; }
+.vsm-process:nth-child(5)  { animation-delay: 0.15s; }
+.vsm-process:nth-child(6)  { animation-delay: 0.18s; }
+.vsm-process:nth-child(7)  { animation-delay: 0.21s; }
+.vsm-process:nth-child(8)  { animation-delay: 0.24s; }
+.vsm-process:nth-child(9)  { animation-delay: 0.27s; }
+.vsm-process:nth-child(10) { animation-delay: 0.30s; }

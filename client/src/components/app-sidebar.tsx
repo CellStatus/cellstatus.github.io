@@ -5,6 +5,7 @@ import {
   Settings2,
   Factory,
   FileText,
+  Map,
 } from "lucide-react";
 import {
   Sidebar,
@@ -36,8 +37,13 @@ const navItems = [
     icon: GitBranch,
   },
   {
-    title: "Audit Findings",
-    url: "/audit-findings",
+    title: "VSM Viewer",
+    url: "/simple-vsm",
+    icon: Map,
+  },
+  {
+    title: "SPC Data",
+    url: "/spc-data",
     icon: FileText,
   },
 ];
@@ -54,7 +60,7 @@ export function AppSidebar() {
           </div>
           <div className="flex flex-col">
             <span className="text-lg font-semibold" data-testid="text-app-title">CellStatus</span>
-            <span className="text-xs text-muted-foreground">Manufacturing Managmement Tool</span>
+            <span className="text-xs text-muted-foreground">Floor ME Data Tool</span>
           </div>
         </Link>
       </SidebarHeader>

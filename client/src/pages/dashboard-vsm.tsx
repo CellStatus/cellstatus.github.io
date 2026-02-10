@@ -379,9 +379,9 @@ export default function Dashboard() {
       setActiveAuditMachine(null);
       setAuditCharacteristic('');
       setAuditMeasured('');
-      toast({ title: 'Audit finding saved' });
+      toast({ title: 'SPC record saved' });
     },
-    onError: () => toast({ title: 'Failed to save finding', variant: 'destructive' }),
+    onError: () => toast({ title: 'Failed to save SPC record', variant: 'destructive' }),
   });
 
   const openAuditFor = (machineId: string) => setActiveAuditMachine(machineId);
@@ -429,10 +429,10 @@ export default function Dashboard() {
             <Factory className="h-10 w-10 text-primary" />
             <div>
               <h1 className="text-2xl font-bold">
-                Manufacturing Management Dashboard
+                ME Companion
               </h1>
               <p className="text-sm text-muted-foreground mt-1">
-                Manage machines, audits, and value stream maps
+                Manage machines, SPC data, and value stream maps
               </p>
             </div>
           </div>
@@ -446,16 +446,16 @@ export default function Dashboard() {
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                Total Findings
+                Total SPC Records
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold">{totalFindings}</div>
-              <p className="text-xs text-muted-foreground">all-time findings</p>
+              <p className="text-xs text-muted-foreground">all-time SPC records</p>
               <div className="mt-3">
-                <Button size="sm" onClick={() => setLocation('/audit-findings?openNew=1')}> 
+                <Button size="sm" onClick={() => setLocation('/spc-data?openNew=1')}>
                   <Plus className="mr-2 h-3 w-3" />
-                  New Finding
+                  New SPC Record
                 </Button>
               </div>
             </CardContent>
@@ -468,13 +468,13 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-amber-600">{findingsLast7Days}</div>
-              <p className="text-xs text-muted-foreground">findings in last 7 days</p>
+              <p className="text-xs text-muted-foreground">SPC records in last 7 days</p>
             </CardContent>
           </Card>
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                Closed Findings
+                Closed Records
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -484,20 +484,20 @@ export default function Dashboard() {
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                Most Findings by Machine
+                Most Records by Machine
               </CardTitle>
             </CardHeader>
             <CardContent>
               {machinesWithMostOpen.length === 0 ? (
-                <div className="text-sm text-muted-foreground">No open findings</div>
+                <div className="text-sm text-muted-foreground">No open records</div>
               ) : (
                 <div className="space-y-1">
                   {machinesWithMostOpen.map(m => (
-                    <button key={m.id} onClick={() => setLocation(`/audit-findings?machineId=${encodeURIComponent(m.id)}`)} className="w-full flex items-center justify-between text-left">
+                    <button key={m.id} onClick={() => setLocation(`/spc-data?machineId=${encodeURIComponent(m.id)}`)} className="w-full flex items-center justify-between text-left">
                       <div className="text-sm">{m.name}{m.machineIdValue ? ` (...${String(m.machineIdValue).slice(-3)})` : ''}</div>
                       <div className="text-right">
                         <div className="font-bold text-lg">{m.count}</div>
-                        <div className="text-xs text-muted-foreground">Findings</div>
+                        <div className="text-xs text-muted-foreground">Records</div>
                         {typeof m.distinct === 'number' && (
                           <div className="text-[10px] text-muted-foreground">{m.distinct} unique characteristic{m.distinct === 1 ? '' : 's'}</div>
                         )}
@@ -511,7 +511,7 @@ export default function Dashboard() {
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                Most Findings by Part
+                Most Records by Part
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -520,7 +520,7 @@ export default function Dashboard() {
               ) : (
                 <div className="space-y-1">
                   {topParts.map(p => (
-                    <button key={p.key} onClick={() => setLocation(`/audit-findings?partNumber=${encodeURIComponent(p.key)}`)} className="w-full flex items-center justify-between text-left">
+                    <button key={p.key} onClick={() => setLocation(`/spc-data?partNumber=${encodeURIComponent(p.key)}`)} className="w-full flex items-center justify-between text-left">
                       <div className="min-w-0">
                         <div className="text-sm truncate">{p.key}</div>
                         {p.name && (
@@ -659,21 +659,21 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Problem Characteristics */}
+        {/* SPC Characteristics */}
         <div>
           <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
             <Bell className="h-5 w-5" />
-            Problem Characteristics
+            SPC Characteristics
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {topCharacteristics.length === 0 ? (
               <Card>
                 <CardContent>
-                  <div className="text-sm text-muted-foreground">No findings yet</div>
+                  <div className="text-sm text-muted-foreground">No SPC records yet</div>
                 </CardContent>
               </Card>
             ) : topCharacteristics.map(tc => (
-              <Card key={tc.key} className="cursor-pointer hover:shadow-lg transition" onClick={() => setLocation(`/audit-findings?char=${encodeURIComponent(tc.key)}`)}>
+              <Card key={tc.key} className="cursor-pointer hover:shadow-lg transition" onClick={() => setLocation(`/spc-data?char=${encodeURIComponent(tc.key)}`)}>
                 <CardHeader>
                   <CardTitle className="text-sm font-medium">{tc.charName ? tc.charName : tc.key}</CardTitle>
                 </CardHeader>
@@ -687,7 +687,7 @@ export default function Dashboard() {
                     </div>
                     <div className="flex flex-col items-end">
                       <div className="text-3xl font-bold">{tc.count}</div>
-                      <div className="text-xs text-muted-foreground">Findings</div>
+                      <div className="text-xs text-muted-foreground">Records</div>
                     </div>
                   </div>
                 </CardContent>

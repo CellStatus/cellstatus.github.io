@@ -1011,6 +1011,15 @@ export default function VsmBuilder() {
   const [deleteVsm, setDeleteVsm] = useState<any | null>(null);
   const [rawMaterialUPH, setRawMaterialUPH] = useState<number | undefined>(undefined);
   const [operationNames, setOperationNames] = useState<Record<number, string>>({});
+  const avgUtilPercent = editingMetrics?.avgUtilizationPercent ?? null;
+  const cellBalancePercent = editingMetrics?.cellBalancePercent ?? null;
+  const showAvgUtilizationCard = React.useMemo(() => {
+    if (avgUtilPercent == null) return false;
+    if (!Number.isFinite(avgUtilPercent)) return false;
+    if (cellBalancePercent == null) return true;
+    if (!Number.isFinite(cellBalancePercent)) return true;
+    return Math.abs(avgUtilPercent - cellBalancePercent) > 0.5;
+  }, [avgUtilPercent, cellBalancePercent]);
   
   // Inline editing state for header fields
   const [editingField, setEditingField] = useState<'name' | 'description' | 'status' | 'rawUPH' | null>(null);
@@ -1071,8 +1080,16 @@ export default function VsmBuilder() {
       const savedRawUPH = stationsData?.rawMaterialUPH;
       setRawMaterialUPH(savedRawUPH);
       // Load operation names from stationsJson if saved there
+      // Clean up stale keys for process steps that no longer exist
       const savedOpNames = stationsData?.operationNames || {};
-      setOperationNames(savedOpNames);
+      const activeSteps = new Set(norm.map((s: any) => s.processStep));
+      const cleanedOpNames: Record<number, string> = {};
+      for (const [step, name] of Object.entries(savedOpNames)) {
+        if (activeSteps.has(Number(step)) && name) {
+          cleanedOpNames[Number(step)] = name as string;
+        }
+      }
+      setOperationNames(cleanedOpNames);
       // Save initial state for unsaved changes detection
       setInitialVsmState(JSON.stringify({
         name: vsm.name || '',
@@ -1080,7 +1097,7 @@ export default function VsmBuilder() {
         status: vsm.status || '',
         stations: norm,
         rawMaterialUPH: savedRawUPH,
-        operationNames: savedOpNames,
+        operationNames: cleanedOpNames,
       }));
     } catch (e) {
       setEditingStations(null);
@@ -1129,7 +1146,22 @@ export default function VsmBuilder() {
   }
   function removeEditStation(id: string) {
     if (!editingStations) return;
-    setEditingStations(prev => prev ? prev.filter(s => s.id !== id) : prev);
+    setEditingStations(prev => {
+      if (!prev) return prev;
+      const updated = prev.filter(s => s.id !== id);
+      // Clean up operationNames for process steps that no longer have any stations
+      const remainingSteps = new Set(updated.map(s => s.processStep));
+      setOperationNames(prevNames => {
+        const cleaned: Record<number, string> = {};
+        for (const [step, name] of Object.entries(prevNames)) {
+          if (remainingSteps.has(Number(step))) {
+            cleaned[Number(step)] = name;
+          }
+        }
+        return cleaned;
+      });
+      return updated;
+    });
   }
   function updateEditStation(idx: number, patch: Partial<VsmStation>) {
     if (!editingStations) return;
@@ -1149,7 +1181,7 @@ export default function VsmBuilder() {
         name: editingName,
         description: editingDescription,
         status: editingStatus,
-        stationsJson: { stations: stationsToSave, rawMaterialUPH, operationNames },
+        stationsJson: { stations: stationsToSave, rawMaterialUPH, operationNames: Object.fromEntries(Object.entries(operationNames).filter(([, v]) => v && v.trim())) },
         bottleneckRate: metrics ? metrics.systemThroughputUPH / 3600 : null,
         processEfficiency: metrics ? metrics.cellBalancePercent : null,
       };
@@ -1542,7 +1574,7 @@ export default function VsmBuilder() {
                               
                               <div className="border-l-4 border-indigo-500 pl-3">
                                 <p className="font-semibold">Average Utilization</p>
-                                <p className="text-muted-foreground text-xs">How much of each operation's capacity is being used on average. Lower utilization = spare capacity.</p>
+                                <p className="text-muted-foreground text-xs">How much of each operation's capacity is being used on average. Lower utilization = spare capacity. Hidden when it matches Cell Balance within 0.5% to avoid duplicate metrics.</p>
                                 <p className="text-xs font-mono bg-muted/50 p-1 rounded mt-1">= Average of (System Throughput / Operation Capacity) × 100%</p>
                               </div>
                               
@@ -1633,14 +1665,16 @@ export default function VsmBuilder() {
                     <div className="text-xl font-bold text-cyan-600">{editingMetrics.cellBalancePercent.toFixed(1)}%</div>
                     <div className="text-xs text-muted-foreground">line efficiency</div>
                   </div>
-                  <div 
-                    className="p-3 bg-indigo-500/10 rounded border border-indigo-500/20 cursor-help"
-                    title={`Avg Utilization = Average of (System Throughput / Op Capacity) × 100%\n= Average of [${editingMetrics.steps.map(s => s.avgUtilPercent.toFixed(0) + '%').join(', ')}]\n= ${editingMetrics.avgUtilizationPercent.toFixed(1)}%\n\nHow much of total capacity is being used.`}
-                  >
-                    <div className="text-xs text-muted-foreground">Avg Utilization</div>
-                    <div className="text-xl font-bold text-indigo-600">{editingMetrics.avgUtilizationPercent.toFixed(1)}%</div>
-                    <div className="text-xs text-muted-foreground">capacity used</div>
-                  </div>
+                  {showAvgUtilizationCard && (
+                    <div 
+                      className="p-3 bg-indigo-500/10 rounded border border-indigo-500/20 cursor-help"
+                      title={`Avg Utilization = Average of (System Throughput / Op Capacity) × 100%\n= Average of [${editingMetrics.steps.map(s => s.avgUtilPercent.toFixed(0) + '%').join(', ')}]\n= ${editingMetrics.avgUtilizationPercent.toFixed(1)}%\n\nHow much of total capacity is being used.`}
+                    >
+                      <div className="text-xs text-muted-foreground">Avg Utilization</div>
+                      <div className="text-xl font-bold text-indigo-600">{editingMetrics.avgUtilizationPercent.toFixed(1)}%</div>
+                      <div className="text-xs text-muted-foreground">capacity used</div>
+                    </div>
+                  )}
                   <div 
                     className="p-3 bg-purple-500/10 rounded border border-purple-500/20 cursor-help"
                     title={`Lead Time = Value-Add Time + Waiting Time\n= ${editingMetrics.valueAddTimeSec.toFixed(1)}s + ${editingMetrics.totalWaitingTimeSec.toFixed(1)}s\n= ${editingMetrics.totalLeadTimeSec.toFixed(1)}s\n\nTotal time for one unit to flow through the system.`}
@@ -1769,7 +1803,15 @@ export default function VsmBuilder() {
                   rawMaterialUPH={rawMaterialUPH}
                   setRawMaterialUPH={setRawMaterialUPH}
                   stepOperationNames={operationNames}
-                  setStepOperationName={(step, name) => setOperationNames(prev => ({ ...prev, [step]: name }))}
+                  setStepOperationName={(step, name) => setOperationNames(prev => {
+                    const next = { ...prev };
+                    if (name.trim()) {
+                      next[step] = name;
+                    } else {
+                      delete next[step];
+                    }
+                    return next;
+                  })}
                 />
               </CardContent>
             </Card>

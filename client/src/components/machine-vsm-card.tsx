@@ -118,19 +118,19 @@ export function MachineVSMCard({
                 ) : typeof findingsCount === 'number' && findingsCount > 0 ? (
                   <Badge variant="secondary" className="mr-2">{findingsCount}</Badge>
                 ) : null}
-                Open Findings
+                Open SPC Records
               </DropdownMenuItem>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div>
-                    <DropdownMenuItem onClick={() => setLocation(`/audit-findings?machineId=${encodeURIComponent(machine.id)}&status=open`)}>
+                    <DropdownMenuItem onClick={() => setLocation(`/spc-data?machineId=${encodeURIComponent(machine.id)}&status=open`)}>
                       <FileText className="mr-2 h-4 w-4" />
-                      View Open Findings
+                      View Open SPC Records
                     </DropdownMenuItem>
                   </div>
                 </TooltipTrigger>
                 <TooltipContent side="right">
-                  {typeof openFindingsCount === 'number' && openFindingsCount > 0 ? `${openFindingsCount} open` : 'No open findings'}
+                  {typeof openFindingsCount === 'number' && openFindingsCount > 0 ? `${openFindingsCount} open` : 'No open records'}
                 </TooltipContent>
               </Tooltip>
               <DropdownMenuSeparator />

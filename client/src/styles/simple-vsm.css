@@ -1,0 +1,284 @@
+/* ============================================================
+   SimpleVSM — Value Stream Map Visual Elements
+   Scoped under .simple-vsm-root to avoid conflicts
+   ============================================================ */
+
+/* ─── Supplier / Customer Icons ─── */
+.simple-vsm-root .vsm-entity {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  z-index: 10;
+}
+.simple-vsm-root .vsm-entity-icon {
+  width: 90px;
+  height: 70px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.simple-vsm-root .vsm-entity-icon svg {
+  width: 100%;
+  height: 100%;
+}
+.simple-vsm-root .vsm-entity-label {
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  color: #1a1a2e;
+  max-width: 110px;
+}
+.simple-vsm-root .vsm-entity-sublabel {
+  font-size: 11px;
+  font-weight: 500;
+  color: #637381;
+  text-align: center;
+}
+
+/* ─── Process Box ─── */
+.simple-vsm-root .vsm-process {
+  position: absolute;
+  z-index: 10;
+}
+.simple-vsm-root .vsm-process-box {
+  width: 150px;
+  min-height: 50px;
+  background: #fff;
+  border: 2px solid #334155;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 6px;
+  cursor: default;
+  transition: box-shadow 0.15s, border-color 0.15s;
+  position: relative;
+}
+.simple-vsm-root .vsm-process-box:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+}
+.simple-vsm-root .vsm-process.bottleneck .vsm-process-box {
+  border-color: #ef4444;
+  background: #fef2f2;
+}
+.simple-vsm-root .vsm-process.bottleneck .vsm-process-name {
+  color: #ef4444;
+}
+.simple-vsm-root .vsm-process-name {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #1a1a2e;
+  text-align: center;
+  line-height: 1.2;
+}
+.simple-vsm-root .vsm-process-step {
+  font-size: 10px;
+  font-weight: 600;
+  color: #637381;
+  margin-top: 1px;
+}
+
+/* ─── Data Box (below process box) ─── */
+.simple-vsm-root .vsm-data-box {
+  width: 150px;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-top: 2px solid #334155;
+  margin-top: -1px;
+  padding: 5px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.simple-vsm-root .vsm-data-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+.simple-vsm-root .vsm-data-key {
+  color: #637381;
+  font-weight: 500;
+}
+.simple-vsm-root .vsm-data-val {
+  color: #1a1a2e;
+  font-weight: 700;
+}
+.simple-vsm-root .vsm-process.bottleneck .vsm-data-box {
+  border-color: #fca5a5;
+  border-top-color: #ef4444;
+}
+
+/* ─── Production Control Box ─── */
+.simple-vsm-root .vsm-control {
+  position: absolute;
+  z-index: 10;
+}
+.simple-vsm-root .vsm-control-box {
+  background: #fff;
+  border: 2px solid #64748b;
+  border-radius: 4px;
+  padding: 10px 18px;
+  text-align: center;
+}
+.simple-vsm-root .vsm-control-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1a1a2e;
+}
+
+/* ─── Timeline Ladder ─── */
+.simple-vsm-root .vsm-timeline {
+  position: absolute;
+  z-index: 10;
+}
+/* Timeline segments are now SVG-based for crisp rendering at any zoom */
+.simple-vsm-root .vsm-timeline-value {
+  position: absolute;
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+  color: #637381;
+  white-space: nowrap;
+}
+.simple-vsm-root .vsm-timeline-value.wait-value {
+  color: #94a3b8;
+}
+.simple-vsm-root .vsm-timeline-value.process-value {
+  color: #2563eb;
+}
+
+/* ─── Timeline Totals ─── */
+.simple-vsm-root .vsm-timeline-totals {
+  position: absolute;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.simple-vsm-root .vsm-timeline-total {
+  font-size: 11px;
+  font-weight: 700;
+}
+.simple-vsm-root .vsm-timeline-total .label {
+  color: #637381;
+  font-weight: 500;
+}
+.simple-vsm-root .vsm-timeline-total .value {
+  color: #1a1a2e;
+}
+
+/* ─── Bottleneck Badge ─── */
+.simple-vsm-root .vsm-bottleneck-badge {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  z-index: 15;
+}
+
+/* ─── Empty state ─── */
+.simple-vsm-root .vsm-empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  color: #637381;
+}
+.simple-vsm-root .vsm-empty h2 {
+  margin: 16px 0 6px;
+  font-size: 20px;
+  color: #1a1a2e;
+}
+.simple-vsm-root .vsm-empty p {
+  font-size: 14px;
+}
+
+/* ─── Animations ─── */
+@keyframes vsmFadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.simple-vsm-root .vsm-process,
+.simple-vsm-root .vsm-entity,
+.simple-vsm-root .vsm-inventory,
+.simple-vsm-root .vsm-timeline {
+  animation: vsmFadeIn 0.35s ease-out both;
+}
+.simple-vsm-root .vsm-process:nth-child(1)  { animation-delay: 0.03s; }
+.simple-vsm-root .vsm-process:nth-child(2)  { animation-delay: 0.06s; }
+.simple-vsm-root .vsm-process:nth-child(3)  { animation-delay: 0.09s; }
+.simple-vsm-root .vsm-process:nth-child(4)  { animation-delay: 0.12s; }
+.simple-vsm-root .vsm-process:nth-child(5)  { animation-delay: 0.15s; }
+.simple-vsm-root .vsm-process:nth-child(6)  { animation-delay: 0.18s; }
+.simple-vsm-root .vsm-process:nth-child(7)  { animation-delay: 0.21s; }
+.simple-vsm-root .vsm-process:nth-child(8)  { animation-delay: 0.24s; }
+.simple-vsm-root .vsm-process:nth-child(9)  { animation-delay: 0.27s; }
+.simple-vsm-root .vsm-process:nth-child(10) { animation-delay: 0.30s; }
+
+/* ─── Print ─── */
+@media print {
+  .simple-vsm-toolbar,
+  .simple-vsm-metrics { display: none !important; }
+  .simple-vsm-canvas-container {
+    overflow: visible !important;
+    height: auto !important;
+    background: #fff !important;
+  }
+  .simple-vsm-canvas {
+    transform: none !important;
+  }
+}
+
+/* ─── Dark mode overrides ─── */
+.dark .simple-vsm-root .vsm-entity-label,
+.dark .simple-vsm-root .vsm-process-name,
+.dark .simple-vsm-root .vsm-data-val,
+.dark .simple-vsm-root .vsm-control-label,
+.dark .simple-vsm-root .vsm-timeline-total .value,
+.dark .simple-vsm-root .vsm-empty h2 {
+  color: #e2e8f0;
+}
+.dark .simple-vsm-root .vsm-entity-sublabel,
+.dark .simple-vsm-root .vsm-process-step,
+.dark .simple-vsm-root .vsm-data-key,
+.dark .simple-vsm-root .vsm-timeline-value,
+.dark .simple-vsm-root .vsm-timeline-total .label,
+.dark .simple-vsm-root .vsm-empty {
+  color: #94a3b8;
+}
+.dark .simple-vsm-root .vsm-process-box {
+  background: #1e293b;
+  border-color: #475569;
+}
+.dark .simple-vsm-root .vsm-data-box {
+  background: #1e293b;
+  border-color: #475569;
+  border-top-color: #475569;
+}
+.dark .simple-vsm-root .vsm-control-box {
+  background: #1e293b;
+  border-color: #475569;
+}
+.dark .simple-vsm-root .vsm-process.bottleneck .vsm-process-box {
+  border-color: #ef4444;
+  background: #3b1111;
+}
+.dark .simple-vsm-root .vsm-process.bottleneck .vsm-data-box {
+  border-color: #7f1d1d;
+  border-top-color: #ef4444;
+}
+/* Dark mode timeline SVG colors handled in renderer */

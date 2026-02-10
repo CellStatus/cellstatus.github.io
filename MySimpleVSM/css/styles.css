@@ -1,0 +1,326 @@
+/* ============================================================
+   SimpleVSM — Application Chrome & Layout
+   ============================================================ */
+
+:root {
+  --bg: #f0f2f5;
+  --surface: #ffffff;
+  --border: #dfe3e8;
+  --text: #1a1a2e;
+  --text-secondary: #637381;
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --danger: #ef4444;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --bottleneck: #ef4444;
+  --toolbar-bg: #1a1a2e;
+  --toolbar-text: #e2e8f0;
+  --radius: 8px;
+  --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+  --shadow-lg: 0 10px 25px rgba(0,0,0,0.1), 0 4px 10px rgba(0,0,0,0.06);
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* ─── Toolbar ─── */
+#toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 52px;
+  padding: 0 16px;
+  background: var(--toolbar-bg);
+  color: var(--toolbar-text);
+  user-select: none;
+  z-index: 100;
+}
+
+.toolbar-left, .toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.toolbar-center {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+
+#mapTitle {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 6px 16px;
+  text-align: center;
+  width: 340px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+#mapTitle:focus {
+  border-color: var(--primary);
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: -0.3px;
+  color: #fff;
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 28px;
+  background: rgba(255,255,255,0.15);
+  margin: 0 6px;
+}
+
+.tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 6px;
+  color: var(--toolbar-text);
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.tool-btn:hover {
+  background: rgba(255,255,255,0.16);
+  border-color: rgba(255,255,255,0.25);
+}
+.tool-btn.icon-only {
+  padding: 6px 8px;
+}
+
+/* ─── Metrics Bar ─── */
+#metricsBar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  height: 54px;
+  padding: 0 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 20px;
+  border-right: 1px solid var(--border);
+  min-width: 110px;
+}
+.metric:last-child { border-right: none; }
+.metric-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+}
+.metric-value {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  margin-top: 1px;
+}
+
+/* ─── Canvas Container ─── */
+#canvasContainer {
+  position: relative;
+  flex: 1;
+  height: calc(100vh - 52px - 54px);
+  overflow: auto;
+  background:
+    radial-gradient(circle, #d1d5db 1px, transparent 1px);
+  background-size: 20px 20px;
+  cursor: grab;
+}
+#canvasContainer:active { cursor: grabbing; }
+
+#vsmCanvas {
+  position: relative;
+  min-width: 100%;
+  min-height: 100%;
+  transform-origin: 0 0;
+  transition: transform 0.1s ease-out;
+}
+
+/* ─── Empty state ─── */
+#emptyState {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  color: var(--text-secondary);
+}
+#emptyState h2 {
+  margin: 16px 0 6px;
+  font-size: 20px;
+  color: var(--text);
+}
+#emptyState p {
+  margin-bottom: 20px;
+  font-size: 14px;
+}
+#emptyState .primary-btn {
+  margin: 0 6px;
+}
+
+/* ─── Buttons ─── */
+.primary-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--primary);
+  color: #fff;
+  border: 2px solid var(--primary);
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 10px 24px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.primary-btn:hover {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+}
+.primary-btn.outline {
+  background: transparent;
+  color: var(--primary);
+}
+.primary-btn.outline:hover {
+  background: var(--primary);
+  color: #fff;
+}
+
+/* ─── Modal ─── */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal.hidden { display: none; }
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+}
+.modal-content {
+  position: relative;
+  width: 700px;
+  max-width: 90vw;
+  max-height: 85vh;
+  background: var(--surface);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.modal-header h3 {
+  font-size: 16px;
+  font-weight: 700;
+}
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 22px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  padding: 4px;
+  line-height: 1;
+}
+.modal-body {
+  flex: 1;
+  padding: 16px 20px;
+  overflow: auto;
+}
+#jsonEditor {
+  width: 100%;
+  height: 400px;
+  font-family: 'Consolas', 'Fira Code', monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  resize: vertical;
+  outline: none;
+  background: #f8fafc;
+}
+#jsonEditor:focus {
+  border-color: var(--primary);
+}
+.json-error {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  color: var(--danger);
+  font-size: 12.5px;
+}
+.json-error.hidden { display: none; }
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+}
+.modal-footer .tool-btn {
+  color: var(--text);
+  background: var(--bg);
+  border-color: var(--border);
+}
+
+/* ─── Print ─── */
+@media print {
+  #toolbar, #metricsBar, .modal { display: none !important; }
+  #canvasContainer {
+    overflow: visible !important;
+    height: auto !important;
+    background: #fff !important;
+  }
+  #vsmCanvas {
+    transform: none !important;
+  }
+}
