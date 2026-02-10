@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
-import { insertMachineSchema, insertVsmConfigurationSchema, machineStatuses, insertAuditFindingSchema } from "@shared/schema";
+import { insertMachineSchema, insertVsmConfigurationSchema, machineStatuses, insertPartSchema, insertCharacteristicSchema, insertSpcMeasurementSchema } from "@shared/schema";
 import { z } from "zod";
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
@@ -119,7 +119,164 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  // ============ AUDIT FINDINGS ROUTES ============
+  // ============ PARTS ROUTES ============
+
+  app.get('/api/parts', async (_req, res) => {
+    try {
+      const allParts = await storage.getParts();
+      res.json(allParts);
+    } catch (err) {
+      console.error('Error fetching parts', err);
+      res.status(500).json({ message: 'Failed to fetch parts' });
+    }
+  });
+
+  app.post('/api/parts', async (req, res) => {
+    try {
+      const validated = insertPartSchema.parse(req.body);
+      const part = await storage.createPart(validated);
+      res.status(201).json(part);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Invalid part data', details: err.errors });
+      }
+      console.error('Error creating part', err);
+      res.status(500).json({ message: 'Failed to create part' });
+    }
+  });
+
+  app.patch('/api/parts/:id', async (req, res) => {
+    try {
+      const partial = insertPartSchema.partial().parse(req.body);
+      const updated = await storage.updatePart(req.params.id, partial);
+      if (!updated) return res.status(404).json({ message: 'Part not found' });
+      res.json(updated);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Invalid part data', details: err.errors });
+      }
+      console.error('Error updating part', err);
+      res.status(500).json({ message: 'Failed to update part' });
+    }
+  });
+
+  app.delete('/api/parts/:id', async (req, res) => {
+    try {
+      const success = await storage.deletePart(req.params.id);
+      if (!success) return res.status(404).json({ message: 'Part not found' });
+      res.json({ success: true });
+    } catch (err) {
+      console.error('Error deleting part', err);
+      res.status(500).json({ message: 'Failed to delete part' });
+    }
+  });
+
+  // ============ CHARACTERISTICS ROUTES ============
+
+  app.get('/api/characteristics', async (_req, res) => {
+    try {
+      const chars = await storage.getCharacteristics();
+      res.json(chars);
+    } catch (err) {
+      console.error('Error fetching characteristics', err);
+      res.status(500).json({ message: 'Failed to fetch characteristics' });
+    }
+  });
+
+  app.get('/api/parts/:id/characteristics', async (req, res) => {
+    try {
+      const chars = await storage.getCharacteristicsByPart(req.params.id);
+      res.json(chars);
+    } catch (err) {
+      console.error('Error fetching characteristics for part', err);
+      res.status(500).json({ message: 'Failed to fetch characteristics' });
+    }
+  });
+
+  app.post('/api/characteristics', async (req, res) => {
+    try {
+      const validated = insertCharacteristicSchema.parse(req.body);
+      const char = await storage.createCharacteristic(validated);
+      res.status(201).json(char);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Invalid characteristic data', details: err.errors });
+      }
+      console.error('Error creating characteristic', err);
+      res.status(500).json({ message: 'Failed to create characteristic' });
+    }
+  });
+
+  app.patch('/api/characteristics/:id', async (req, res) => {
+    try {
+      const partial = insertCharacteristicSchema.partial().parse(req.body);
+      const updated = await storage.updateCharacteristic(req.params.id, partial);
+      if (!updated) return res.status(404).json({ message: 'Characteristic not found' });
+      res.json(updated);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Invalid characteristic data', details: err.errors });
+      }
+      console.error('Error updating characteristic', err);
+      res.status(500).json({ message: 'Failed to update characteristic' });
+    }
+  });
+
+  app.delete('/api/characteristics/:id', async (req, res) => {
+    try {
+      const success = await storage.deleteCharacteristic(req.params.id);
+      if (!success) return res.status(404).json({ message: 'Characteristic not found' });
+      res.json({ success: true });
+    } catch (err) {
+      console.error('Error deleting characteristic', err);
+      res.status(500).json({ message: 'Failed to delete characteristic' });
+    }
+  });
+
+  // ============ SPC MEASUREMENTS ROUTES ============
+
+  app.post('/api/measurements', async (req, res) => {
+    try {
+      const validated = insertSpcMeasurementSchema.parse(req.body);
+      const measurement = await storage.createMeasurement(validated);
+      res.status(201).json(measurement);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Invalid measurement data', details: err.errors });
+      }
+      console.error('Error creating measurement', err);
+      res.status(500).json({ message: 'Failed to create measurement' });
+    }
+  });
+
+  app.patch('/api/measurements/:id', async (req, res) => {
+    try {
+      const partial = insertSpcMeasurementSchema.partial().parse(req.body);
+      const updated = await storage.updateMeasurement(req.params.id, partial);
+      if (!updated) return res.status(404).json({ message: 'Measurement not found' });
+      res.json(updated);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Invalid measurement data', details: err.errors });
+      }
+      console.error('Error updating measurement', err);
+      res.status(500).json({ message: 'Failed to update measurement' });
+    }
+  });
+
+  app.delete('/api/measurements/:id', async (req, res) => {
+    try {
+      const success = await storage.deleteMeasurement(req.params.id);
+      if (!success) return res.status(404).json({ message: 'Measurement not found' });
+      res.json({ success: true });
+    } catch (err) {
+      console.error('Error deleting measurement', err);
+      res.status(500).json({ message: 'Failed to delete measurement' });
+    }
+  });
+
+  // ============ LEGACY / BACKWARD-COMPAT SPC ROUTES ============
+  // These return flat joined records for the existing frontend
 
   app.get('/api/audit-findings', async (_req, res) => {
     try {
@@ -128,17 +285,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (err) {
       console.error('Error fetching audit findings', err);
       res.status(500).json({ message: 'Failed to fetch audit findings' });
-    }
-  });
-
-  // Return distinct part numbers found in audit findings
-  app.get('/api/parts', async (_req, res) => {
-    try {
-      const parts = await storage.getDistinctPartNumbers();
-      res.json(parts);
-    } catch (err) {
-      console.error('Error fetching part numbers', err);
-      res.status(500).json({ message: 'Failed to fetch part numbers' });
     }
   });
 
@@ -155,36 +301,54 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post('/api/machines/:id/findings', async (req, res) => {
     try {
       const payload = { ...req.body, machineId: req.params.id };
-      const validated = insertAuditFindingSchema.parse(payload);
-      const created = await storage.createAuditFinding(validated);
+      const created = await storage.createAuditFinding(payload);
       res.status(201).json(created);
     } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({ error: 'Invalid audit finding', details: err.errors });
-      }
       console.error('Error creating audit finding', err);
       res.status(500).json({ message: 'Failed to create audit finding' });
     }
   });
 
-  // Update an audit finding
+  // Bulk import audit findings (from CSV import)
+  app.post('/api/bulk-findings', async (req, res) => {
+    try {
+      const items = req.body?.findings;
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ message: 'Expected a non-empty "findings" array.' });
+      }
+      const created: any[] = [];
+      const errors: string[] = [];
+      for (let i = 0; i < items.length; i++) {
+        try {
+          const result = await storage.createAuditFinding(items[i]);
+          created.push(result);
+        } catch (err) {
+          const msg = err instanceof z.ZodError
+            ? err.errors.map(e => e.message).join(', ')
+            : String(err);
+          errors.push(`Item ${i}: ${msg}`);
+        }
+      }
+      res.status(201).json({ created: created.length, errors });
+    } catch (err) {
+      console.error('Error in bulk import', err);
+      res.status(500).json({ message: 'Bulk import failed' });
+    }
+  });
+
+  // Update a finding (legacy flat update)
   app.patch('/api/findings/:id', async (req, res) => {
     try {
-      const partial = insertAuditFindingSchema.partial();
-      const validated = partial.parse(req.body);
-      const updated = await storage.updateAuditFinding(req.params.id, validated as any);
+      const updated = await storage.updateAuditFinding(req.params.id, req.body);
       if (!updated) return res.status(404).json({ message: 'Audit finding not found' });
       res.json(updated);
     } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({ error: 'Invalid audit finding update', details: err.errors });
-      }
       console.error('Error updating audit finding', err);
       res.status(500).json({ message: 'Failed to update audit finding' });
     }
   });
 
-  // Delete an audit finding
+  // Delete a finding
   app.delete('/api/findings/:id', async (req, res) => {
     try {
       const success = await storage.deleteAuditFinding(req.params.id);

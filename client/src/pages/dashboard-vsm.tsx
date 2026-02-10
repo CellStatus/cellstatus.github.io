@@ -321,27 +321,26 @@ export default function Dashboard() {
     queryFn: async () => apiRequest('GET', '/api/audit-findings'),
   });
 
+  // Only show open (non-closed) records on the dashboard
+  const openFindings = useMemo(() => {
+    return (auditFindings || []).filter(f => (f.status || 'open') !== 'closed');
+  }, [auditFindings]);
+
   const findingsByMachine = useMemo(() => {
     const map: Record<string, any[]> = {};
-    (auditFindings || []).forEach(f => {
+    (openFindings || []).forEach(f => {
       if (!map[f.machineId]) map[f.machineId] = [];
       map[f.machineId].push(f);
     });
     return map;
-  }, [auditFindings]);
-
-  const openClosedCounts = useMemo(() => {
-    const open = (auditFindings || []).filter(f => (f.status || 'open') === 'open').length;
-    const closed = (auditFindings || []).filter(f => (f.status || 'open') === 'closed').length;
-    return { open, closed };
-  }, [auditFindings]);
+  }, [openFindings]);
 
   const topCharacteristics = useMemo(() => {
     // Map by characteristic key (charNumber or charName) and store sample part info
     const map = new Map<string, { key: string; charNumber: string; charName: string; partNumber: string; partName: string; count: number }>();
-    (auditFindings || []).forEach(f => {
+    (openFindings || []).forEach(f => {
       const charNumber = ((f as any).charNumber || '').toString();
-      const charName = (f as any).charName || f.characteristic || '';
+      const charName = (f as any).charName || '';
       const partNumber = ((f as any).partNumber || '').toString();
       const partName = (f as any).partName || '';
       const key = charNumber || charName || '(unknown)';
@@ -355,21 +354,21 @@ export default function Dashboard() {
       map.set(key, cur);
     });
     return Array.from(map.values()).sort((a, b) => b.count - a.count).slice(0, 3);
-  }, [auditFindings]);
+  }, [openFindings]);
 
-  const totalFindings = (auditFindings || []).length;
+  const totalFindings = (openFindings || []).length;
 
   const findingsLast7Days = useMemo(() => {
     const now = Date.now();
     const cutoff = now - 7 * 24 * 60 * 60 * 1000;
-    return (auditFindings || []).filter(f => {
+    return (openFindings || []).filter(f => {
       try {
         return new Date((f as any).createdAt).getTime() >= cutoff;
       } catch (e) {
         return false;
       }
     }).length;
-  }, [auditFindings]);
+  }, [openFindings]);
 
   const machinesWithMostOpen = useMemo(() => {
     // Compute total open findings per machine and distinct characteristic count
@@ -379,7 +378,7 @@ export default function Dashboard() {
       if ((f.status || 'open') !== 'open') return;
       const mid = f.machineId || 'unknown';
       totalMap.set(mid, (totalMap.get(mid) || 0) + 1);
-      const key = ((f as any).charNumber || (f as any).charName || f.characteristic || '(unknown)').toString();
+      const key = ((f as any).charNumber || (f as any).charName || '(unknown)').toString();
       if (!charsMap.has(mid)) charsMap.set(mid, new Set());
       charsMap.get(mid)!.add(key);
     });
@@ -394,7 +393,7 @@ export default function Dashboard() {
 
   const topParts = useMemo(() => {
     const map = new Map<string, { key: string; name: string; count: number }>();
-    (auditFindings || []).forEach(f => {
+    (openFindings || []).forEach(f => {
       const pn = ((f as any).partNumber || '').toString();
       const name = (f as any).partName || '';
       const key = pn || name || '(unknown)';
@@ -403,7 +402,7 @@ export default function Dashboard() {
       map.set(key, cur);
     });
     return Array.from(map.values()).sort((a, b) => b.count - a.count).slice(0, 3);
-  }, [auditFindings]);
+  }, [openFindings]);
 
   const [activeAuditMachine, setActiveAuditMachine] = useState<string | null>(null);
   const [auditCharacteristic, setAuditCharacteristic] = useState('');
@@ -510,18 +509,6 @@ export default function Dashboard() {
             <CardContent>
               <div className="text-3xl font-bold text-amber-600">{findingsLast7Days}</div>
               <p className="text-xs text-muted-foreground">SPC records in last 7 days</p>
-            </CardContent>
-          </Card>
-          <Card
-            {...clickableCardProps(() => goToSpcData({ status: 'closed' }))}
-          >
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Closed Records
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-green-600">{openClosedCounts.closed}</div>
             </CardContent>
           </Card>
           <Card

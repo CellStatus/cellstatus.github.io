@@ -2,11 +2,16 @@ import {
   type Machine, type InsertMachine,
   type MachineStatus,
   type VsmConfiguration, type InsertVsmConfiguration,
-  machines, vsmConfigurations, auditFindings, InsertAuditFinding, AuditFinding,
+  type Part, type InsertPart,
+  type Characteristic, type InsertCharacteristic,
+  type SpcMeasurement, type InsertSpcMeasurement,
+  type SpcRecordFlat,
+  machines, vsmConfigurations,
+  parts, characteristics, spcMeasurements,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 
 export interface IStorage {
   // Machines
@@ -25,12 +30,39 @@ export interface IStorage {
   updateVsmConfiguration(id: string, updates: Partial<InsertVsmConfiguration>): Promise<VsmConfiguration | undefined>;
   deleteVsmConfiguration(id: string): Promise<boolean>;
 
-  // Audit findings
-  getAuditFindings(): Promise<AuditFinding[]>;
-  getFindingsByMachine(machineId: string): Promise<AuditFinding[]>;
+  // Parts
+  getParts(): Promise<Part[]>;
+  getPartByNumber(partNumber: string): Promise<Part | undefined>;
+  createPart(part: InsertPart): Promise<Part>;
+  updatePart(id: string, updates: Partial<InsertPart>): Promise<Part | undefined>;
+  deletePart(id: string): Promise<boolean>;
+
+  // Characteristics
+  getCharacteristics(): Promise<Characteristic[]>;
+  getCharacteristicsByPart(partId: string): Promise<Characteristic[]>;
+  getCharacteristic(id: string): Promise<Characteristic | undefined>;
+  findCharacteristic(partId: string, charNumber: string): Promise<Characteristic | undefined>;
+  createCharacteristic(char: InsertCharacteristic): Promise<Characteristic>;
+  updateCharacteristic(id: string, updates: Partial<InsertCharacteristic>): Promise<Characteristic | undefined>;
+  deleteCharacteristic(id: string): Promise<boolean>;
+
+  // SPC Measurements
+  getMeasurements(): Promise<SpcMeasurement[]>;
+  getMeasurementsByCharacteristic(characteristicId: string): Promise<SpcMeasurement[]>;
+  createMeasurement(measurement: InsertSpcMeasurement): Promise<SpcMeasurement>;
+  updateMeasurement(id: string, updates: Partial<InsertSpcMeasurement>): Promise<SpcMeasurement | undefined>;
+  deleteMeasurement(id: string): Promise<boolean>;
+
+  // Flat joined view (backward compat)
+  getSpcRecordsFlat(): Promise<SpcRecordFlat[]>;
+  getSpcRecordsFlatByMachine(machineId: string): Promise<SpcRecordFlat[]>;
+
+  // Legacy aliases
+  getAuditFindings(): Promise<SpcRecordFlat[]>;
+  getFindingsByMachine(machineId: string): Promise<SpcRecordFlat[]>;
   getDistinctPartNumbers(): Promise<{ partNumber: string; partName?: string }[]>;
-  createAuditFinding(finding: InsertAuditFinding): Promise<AuditFinding>;
-  updateAuditFinding(id: string, updates: Partial<InsertAuditFinding>): Promise<AuditFinding | undefined>;
+  createAuditFinding(finding: any): Promise<SpcRecordFlat>;
+  updateAuditFinding(id: string, updates: any): Promise<SpcRecordFlat | undefined>;
   deleteAuditFinding(id: string): Promise<boolean>;
 }
 
@@ -198,51 +230,279 @@ export class DatabaseStorage implements IStorage {
     return !!result;
   }
 
-  // Audit findings
-  async getAuditFindings(): Promise<AuditFinding[]> {
-    return await db.select().from(auditFindings).orderBy(auditFindings.createdAt);
+  // SPC records — normalized 3NF operations
+  // ─── Parts ───
+  async getParts(): Promise<Part[]> {
+    return await db.select().from(parts).orderBy(parts.partNumber);
   }
 
-  async getDistinctPartNumbers(): Promise<{ partNumber: string; partName?: string }[]> {
-    const rows = await db.selectDistinct({ partNumber: auditFindings.partNumber, partName: auditFindings.partName }).from(auditFindings);
-    // filter out empty/null part numbers
-    return (rows || []).map(r => ({ partNumber: (r as any).partNumber ?? '', partName: (r as any).partName ?? undefined })).filter(r => r.partNumber && r.partNumber.length > 0);
-  }
-
-  async getFindingsByMachine(machineId: string): Promise<AuditFinding[]> {
-    return await db.select().from(auditFindings).where(eq(auditFindings.machineId, machineId)).orderBy(auditFindings.createdAt);
-  }
-
-  async createAuditFinding(finding: InsertAuditFinding): Promise<AuditFinding> {
-    const id = randomUUID();
-    const now = new Date().toISOString();
-    await db.insert(auditFindings).values({ id, ...finding, createdAt: now });
-    const result = await db.select().from(auditFindings).where(eq(auditFindings.id, id)).limit(1);
-    return result[0]!;
-  }
-
-  async updateAuditFinding(id: string, updates: Partial<InsertAuditFinding>): Promise<AuditFinding | undefined> {
-    const now = new Date().toISOString();
-    await db.update(auditFindings).set({
-      ...(updates.characteristic !== undefined ? { characteristic: updates.characteristic } : {}),
-      ...(updates.tolerance !== undefined ? { tolerance: updates.tolerance } : {}),
-      ...(updates.measuredValue !== undefined ? { measuredValue: updates.measuredValue } : {}),
-      ...(updates.correctiveAction !== undefined ? { correctiveAction: updates.correctiveAction } : {}),
-      ...(updates.status !== undefined ? { status: updates.status } : {}),
-      ...(updates.partNumber !== undefined ? { partNumber: updates.partNumber } : {}),
-      ...(updates.partName !== undefined ? { partName: updates.partName } : {}),
-      ...(updates.charNumber !== undefined ? { charNumber: updates.charNumber } : {}),
-      ...(updates.charName !== undefined ? { charName: updates.charName } : {}),
-      ...(updates.charMax !== undefined ? { charMax: updates.charMax } : {}),
-      ...(updates.charMin !== undefined ? { charMin: updates.charMin } : {}),
-    }).where(eq(auditFindings.id, id));
-    const result = await db.select().from(auditFindings).where(eq(auditFindings.id, id)).limit(1);
+  async getPartByNumber(partNumber: string): Promise<Part | undefined> {
+    const result = await db.select().from(parts).where(eq(parts.partNumber, partNumber)).limit(1);
     return result[0];
   }
 
+  async createPart(part: InsertPart): Promise<Part> {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    await db.insert(parts).values({ id, ...part, createdAt: now });
+    const result = await db.select().from(parts).where(eq(parts.id, id)).limit(1);
+    return result[0]!;
+  }
+
+  async updatePart(id: string, updates: Partial<InsertPart>): Promise<Part | undefined> {
+    await db.update(parts).set(updates).where(eq(parts.id, id));
+    const result = await db.select().from(parts).where(eq(parts.id, id)).limit(1);
+    return result[0];
+  }
+
+  async deletePart(id: string): Promise<boolean> {
+    await db.delete(parts).where(eq(parts.id, id));
+    return true;
+  }
+
+  // ─── Characteristics ───
+  async getCharacteristics(): Promise<Characteristic[]> {
+    return await db.select().from(characteristics).orderBy(characteristics.charNumber);
+  }
+
+  async getCharacteristicsByPart(partId: string): Promise<Characteristic[]> {
+    return await db.select().from(characteristics).where(eq(characteristics.partId, partId)).orderBy(characteristics.charNumber);
+  }
+
+  async getCharacteristic(id: string): Promise<Characteristic | undefined> {
+    const result = await db.select().from(characteristics).where(eq(characteristics.id, id)).limit(1);
+    return result[0];
+  }
+
+  async findCharacteristic(partId: string, charNumber: string): Promise<Characteristic | undefined> {
+    const result = await db.select().from(characteristics)
+      .where(and(eq(characteristics.partId, partId), eq(characteristics.charNumber, charNumber)))
+      .limit(1);
+    return result[0];
+  }
+
+  async createCharacteristic(char: InsertCharacteristic): Promise<Characteristic> {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    await db.insert(characteristics).values({ id, ...char, createdAt: now });
+    const result = await db.select().from(characteristics).where(eq(characteristics.id, id)).limit(1);
+    return result[0]!;
+  }
+
+  async updateCharacteristic(id: string, updates: Partial<InsertCharacteristic>): Promise<Characteristic | undefined> {
+    const updateObj: any = {};
+    if (updates.charNumber !== undefined) updateObj.charNumber = updates.charNumber;
+    if (updates.charName !== undefined) updateObj.charName = updates.charName;
+    if (updates.charMax !== undefined) updateObj.charMax = updates.charMax;
+    if (updates.charMin !== undefined) updateObj.charMin = updates.charMin;
+    if (updates.tolerance !== undefined) updateObj.tolerance = updates.tolerance;
+    if (updates.opName !== undefined) updateObj.opName = updates.opName;
+    if (updates.partId !== undefined) updateObj.partId = updates.partId;
+    if (Object.keys(updateObj).length > 0) {
+      await db.update(characteristics).set(updateObj).where(eq(characteristics.id, id));
+    }
+    const result = await db.select().from(characteristics).where(eq(characteristics.id, id)).limit(1);
+    return result[0];
+  }
+
+  async deleteCharacteristic(id: string): Promise<boolean> {
+    // Also delete measurements for this characteristic
+    await db.delete(spcMeasurements).where(eq(spcMeasurements.characteristicId, id));
+    await db.delete(characteristics).where(eq(characteristics.id, id));
+    return true;
+  }
+
+  // ─── Measurements ───
+  async getMeasurements(): Promise<SpcMeasurement[]> {
+    return await db.select().from(spcMeasurements).orderBy(spcMeasurements.createdAt);
+  }
+
+  async getMeasurementsByCharacteristic(characteristicId: string): Promise<SpcMeasurement[]> {
+    return await db.select().from(spcMeasurements).where(eq(spcMeasurements.characteristicId, characteristicId)).orderBy(spcMeasurements.createdAt);
+  }
+
+  async createMeasurement(measurement: InsertSpcMeasurement): Promise<SpcMeasurement> {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    await db.insert(spcMeasurements).values({ id, ...measurement, createdAt: now });
+    const result = await db.select().from(spcMeasurements).where(eq(spcMeasurements.id, id)).limit(1);
+    return result[0]!;
+  }
+
+  async updateMeasurement(id: string, updates: Partial<InsertSpcMeasurement>): Promise<SpcMeasurement | undefined> {
+    const updateObj: any = {};
+    if (updates.measuredValue !== undefined) updateObj.measuredValue = updates.measuredValue;
+    if (updates.status !== undefined) updateObj.status = updates.status;
+    if (updates.recordNote !== undefined) updateObj.recordNote = updates.recordNote;
+    if (updates.machineId !== undefined) updateObj.machineId = updates.machineId;
+    if (updates.characteristicId !== undefined) updateObj.characteristicId = updates.characteristicId;
+    if (Object.keys(updateObj).length > 0) {
+      await db.update(spcMeasurements).set(updateObj).where(eq(spcMeasurements.id, id));
+    }
+    const result = await db.select().from(spcMeasurements).where(eq(spcMeasurements.id, id)).limit(1);
+    return result[0];
+  }
+
+  async deleteMeasurement(id: string): Promise<boolean> {
+    await db.delete(spcMeasurements).where(eq(spcMeasurements.id, id));
+    return true;
+  }
+
+  // ─── Flat joined view (backward compat for dashboard + frontend) ───
+  private async buildFlatRecords(whereClause?: any): Promise<SpcRecordFlat[]> {
+    let query = db
+      .select({
+        id: spcMeasurements.id,
+        machineId: spcMeasurements.machineId,
+        characteristicId: spcMeasurements.characteristicId,
+        partId: characteristics.partId,
+        partNumber: parts.partNumber,
+        partName: parts.partName,
+        charNumber: characteristics.charNumber,
+        charName: characteristics.charName,
+        charMax: characteristics.charMax,
+        charMin: characteristics.charMin,
+        tolerance: characteristics.tolerance,
+        opName: characteristics.opName,
+        measuredValue: spcMeasurements.measuredValue,
+        status: spcMeasurements.status,
+        recordNote: spcMeasurements.recordNote,
+        createdAt: spcMeasurements.createdAt,
+      })
+      .from(spcMeasurements)
+      .innerJoin(characteristics, eq(spcMeasurements.characteristicId, characteristics.id))
+      .innerJoin(parts, eq(characteristics.partId, parts.id))
+      .orderBy(spcMeasurements.createdAt);
+
+    if (whereClause) {
+      return await (query as any).where(whereClause);
+    }
+    return await query;
+  }
+
+  async getSpcRecordsFlat(): Promise<SpcRecordFlat[]> {
+    return this.buildFlatRecords();
+  }
+
+  async getSpcRecordsFlatByMachine(machineId: string): Promise<SpcRecordFlat[]> {
+    return this.buildFlatRecords(eq(spcMeasurements.machineId, machineId));
+  }
+
+  // ─── Legacy aliases for API backward compat ───
+  async getAuditFindings(): Promise<SpcRecordFlat[]> {
+    return this.getSpcRecordsFlat();
+  }
+
+  async getDistinctPartNumbers(): Promise<{ partNumber: string; partName?: string }[]> {
+    const allParts = await this.getParts();
+    return allParts
+      .filter(p => p.partNumber && p.partNumber.length > 0)
+      .map(p => ({ partNumber: p.partNumber, partName: p.partName ?? undefined }));
+  }
+
+  async getFindingsByMachine(machineId: string): Promise<SpcRecordFlat[]> {
+    return this.getSpcRecordsFlatByMachine(machineId);
+  }
+
+  /**
+   * Legacy create: accepts flat payload, resolves or creates part + characteristic,
+   * then creates measurement. Returns flat record.
+   */
+  async createAuditFinding(finding: any): Promise<SpcRecordFlat> {
+    const partNumber = (finding.partNumber || '').toString();
+    const partName = finding.partName || null;
+    const charNumber = (finding.charNumber || finding.characteristic || '').toString();
+    const charName = finding.charName || null;
+
+    // Resolve or create Part
+    let part = partNumber ? await this.getPartByNumber(partNumber) : undefined;
+    if (!part && partNumber) {
+      part = await this.createPart({ partNumber, partName });
+    } else if (part && partName && part.partName !== partName) {
+      part = await this.updatePart(part.id, { partName }) ?? part;
+    }
+    if (!part) {
+      // Fallback: create with placeholder
+      part = await this.createPart({ partNumber: partNumber || '(no-part)', partName });
+    }
+
+    // Resolve or create Characteristic
+    let char = charNumber ? await this.findCharacteristic(part.id, charNumber) : undefined;
+    if (!char) {
+      char = await this.createCharacteristic({
+        partId: part.id,
+        charNumber: charNumber || '(unknown)',
+        charName,
+        charMax: finding.charMax || null,
+        charMin: finding.charMin || null,
+        tolerance: finding.tolerance || null,
+        opName: finding.opName || null,
+      });
+    }
+
+    // Create measurement
+    const measurement = await this.createMeasurement({
+      characteristicId: char.id,
+      machineId: finding.machineId,
+      measuredValue: finding.measuredValue,
+      status: finding.status || 'open',
+      recordNote: finding.correctiveAction || finding.recordNote || null,
+    });
+
+    // Return flat record
+    const flat = await this.buildFlatRecords(eq(spcMeasurements.id, measurement.id));
+    return flat[0]!;
+  }
+
+  /**
+   * Legacy update: accepts flat payload. Updates measurement fields on spc_measurements,
+   * and characteristic fields on characteristics table.
+   */
+  async updateAuditFinding(id: string, updates: any): Promise<SpcRecordFlat | undefined> {
+    // First get the measurement to find its characteristic
+    const meas = await db.select().from(spcMeasurements).where(eq(spcMeasurements.id, id)).limit(1);
+    if (!meas[0]) return undefined;
+
+    // Update measurement fields
+    const measUpdates: any = {};
+    if (updates.measuredValue !== undefined) measUpdates.measuredValue = updates.measuredValue;
+    if (updates.status !== undefined) measUpdates.status = updates.status;
+    if (updates.correctiveAction !== undefined) measUpdates.recordNote = updates.correctiveAction;
+    if (updates.recordNote !== undefined) measUpdates.recordNote = updates.recordNote;
+    if (updates.machineId !== undefined) measUpdates.machineId = updates.machineId;
+    if (Object.keys(measUpdates).length > 0) {
+      await db.update(spcMeasurements).set(measUpdates).where(eq(spcMeasurements.id, id));
+    }
+
+    // Update characteristic fields if any provided
+    const charUpdates: any = {};
+    if (updates.charName !== undefined) charUpdates.charName = updates.charName;
+    if (updates.charMax !== undefined) charUpdates.charMax = updates.charMax;
+    if (updates.charMin !== undefined) charUpdates.charMin = updates.charMin;
+    if (updates.tolerance !== undefined) charUpdates.tolerance = updates.tolerance;
+    if (updates.opName !== undefined) charUpdates.opName = updates.opName;
+    if (updates.charNumber !== undefined) charUpdates.charNumber = updates.charNumber;
+    if (Object.keys(charUpdates).length > 0) {
+      await db.update(characteristics).set(charUpdates).where(eq(characteristics.id, meas[0].characteristicId));
+    }
+
+    // Update part fields if any provided
+    if (updates.partNumber !== undefined || updates.partName !== undefined) {
+      const char = await db.select().from(characteristics).where(eq(characteristics.id, meas[0].characteristicId)).limit(1);
+      if (char[0]) {
+        const partUpdates: any = {};
+        if (updates.partNumber !== undefined) partUpdates.partNumber = updates.partNumber;
+        if (updates.partName !== undefined) partUpdates.partName = updates.partName;
+        await db.update(parts).set(partUpdates).where(eq(parts.id, char[0].partId));
+      }
+    }
+
+    const flat = await this.buildFlatRecords(eq(spcMeasurements.id, id));
+    return flat[0];
+  }
+
   async deleteAuditFinding(id: string): Promise<boolean> {
-    const result = await db.delete(auditFindings).where(eq(auditFindings.id, id));
-    return !!result;
+    return this.deleteMeasurement(id);
   }
 }
 

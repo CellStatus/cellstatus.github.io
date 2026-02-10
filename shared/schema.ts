@@ -71,25 +71,91 @@ export const insertVsmConfigurationSchema = createInsertSchema(vsmConfigurations
 export type InsertVsmConfiguration = z.infer<typeof insertVsmConfigurationSchema>;
 export type VsmConfiguration = typeof vsmConfigurations.$inferSelect;
 
-// === AUDIT FINDINGS ===
+// === SPC DATA (3NF) ===
 
-export const auditFindings = pgTable("audit_findings", {
+// Parts table – one row per unique part
+export const parts = pgTable("parts", {
   id: varchar("id").primaryKey(),
-  machineId: varchar("machine_id").notNull(),
-  characteristic: text("characteristic").notNull(),
-  status: text("status").default("open"),
-  partNumber: text("part_number"),
+  partNumber: text("part_number").notNull(),
   partName: text("part_name"),
-  charNumber: text("char_number"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const insertPartSchema = createInsertSchema(parts).omit({ id: true, createdAt: true });
+export type InsertPart = z.infer<typeof insertPartSchema>;
+export type Part = typeof parts.$inferSelect;
+
+// Characteristics table – one row per unique characteristic within a part
+export const characteristics = pgTable("characteristics", {
+  id: varchar("id").primaryKey(),
+  partId: varchar("part_id").notNull(),  // FK → parts.id
+  charNumber: text("char_number").notNull(),
   charName: text("char_name"),
   charMax: text("char_max"),
   charMin: text("char_min"),
   tolerance: text("tolerance"),
-  measuredValue: text("measured_value").notNull(),
-  correctiveAction: text("corrective_action"),
+  opName: text("op_name"),
   createdAt: text("created_at").notNull(),
 });
 
-export const insertAuditFindingSchema = createInsertSchema(auditFindings).omit({ id: true, createdAt: true });
-export type InsertAuditFinding = z.infer<typeof insertAuditFindingSchema>;
-export type AuditFinding = typeof auditFindings.$inferSelect;
+export const insertCharacteristicSchema = createInsertSchema(characteristics).omit({ id: true, createdAt: true });
+export type InsertCharacteristic = z.infer<typeof insertCharacteristicSchema>;
+export type Characteristic = typeof characteristics.$inferSelect;
+
+// SPC Measurements table – one row per individual measurement
+export const spcMeasurements = pgTable("spc_measurements", {
+  id: varchar("id").primaryKey(),
+  characteristicId: varchar("characteristic_id").notNull(), // FK → characteristics.id
+  machineId: varchar("machine_id").notNull(),               // FK → machines.id
+  measuredValue: text("measured_value").notNull(),
+  status: text("status").default("open"),
+  recordNote: text("record_note"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const insertSpcMeasurementSchema = createInsertSchema(spcMeasurements).omit({ id: true, createdAt: true });
+export type InsertSpcMeasurement = z.infer<typeof insertSpcMeasurementSchema>;
+export type SpcMeasurement = typeof spcMeasurements.$inferSelect;
+
+// Flat joined view type returned by the API for backward compatibility
+export interface SpcRecordFlat {
+  id: string;
+  machineId: string;
+  characteristicId: string;
+  partId: string;
+  partNumber: string;
+  partName: string | null;
+  charNumber: string;
+  charName: string | null;
+  charMax: string | null;
+  charMin: string | null;
+  tolerance: string | null;
+  opName: string | null;
+  measuredValue: string;
+  status: string | null;
+  recordNote: string | null;
+  createdAt: string;
+}
+
+// Backward-compatible aliases so existing frontend code keeps compiling
+export type SpcRecord = SpcRecordFlat;
+export type AuditFinding = SpcRecordFlat;
+export type InsertSpcRecord = InsertSpcMeasurement & {
+  partNumber?: string;
+  partName?: string;
+  charNumber?: string;
+  charName?: string;
+  charMax?: string;
+  charMin?: string;
+  tolerance?: string;
+  opName?: string;
+  characteristic?: string;
+  correctiveAction?: string;
+};
+export type InsertAuditFinding = InsertSpcRecord;
+
+// Keep table aliases for any code that still references these
+export const spcRecords = spcMeasurements;
+export const auditFindings = spcMeasurements;
+export const insertAuditFindingSchema = insertSpcMeasurementSchema;
+export const insertSpcRecordSchema = insertSpcMeasurementSchema;

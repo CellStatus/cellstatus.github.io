@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useCallback } from "react";
+import { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,10 +6,11 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { AuditFinding, Machine } from "@shared/schema";
+import type { AuditFinding, Machine, SpcRecord } from "@shared/schema";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { exportSpcHtml } from "@/lib/spc-export";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -20,338 +21,21 @@ import {
   AlertDialogAction,
 } from "@/components/ui/alert-dialog";
 
-type HistogramBin = { from: number; to: number; count: number };
-
-type RunPoint = { label: string; value: number };
-
-interface ExportRecordRow {
-  value: number | null;
-  displayValue: string;
-  createdAt: string;
-  recordNote?: string;
-  machineName?: string;
-  machineCode?: string;
-  partNumber?: string;
-  partName?: string;
-}
-
-interface ExportGroup {
-  id: string;
-  title: string;
-  subtitle?: string;
-  lsl?: number | null;
-  usl?: number | null;
-  charKey?: string;
-  charName?: string;
-  machineName?: string;
-  machineCode?: string;
-  partNumbers?: string[];
-  records: ExportRecordRow[];
-}
-
-function escapeHtml(value: string | undefined | null): string {
+function escapeCsvField(value: string | undefined | null): string {
   if (value == null) return "";
-  return value.replace(/[&<>"']/g, (char) => {
-    switch (char) {
-      case "&":
-        return "&amp;";
-      case "<":
-        return "&lt;";
-      case ">":
-        return "&gt;";
-      case '"':
-        return "&quot;";
-      case "'":
-        return "&#39;";
-      default:
-        return char;
-    }
-  });
+  const str = String(value);
+  if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
 }
 
-function toNumber(value: unknown): number | null {
-  if (value === undefined || value === null) return null;
-  const normalized = String(value).trim();
-  if (!normalized) return null;
-  const parsed = Number.parseFloat(normalized.replace(/,/g, ""));
-  return Number.isFinite(parsed) ? parsed : null;
+function buildCsvRow(fields: (string | undefined | null)[]): string {
+  return fields.map(escapeCsvField).join(",");
 }
 
-function formatNumber(value: number, digits = 3): string {
-  if (!Number.isFinite(value)) return "—";
-  const fixed = value.toFixed(digits);
-  const asNumber = Number.parseFloat(fixed);
-  if (Object.is(asNumber, -0)) return "0";
-  return asNumber.toString();
-}
-
-function computeStats(values: number[]) {
-  if (values.length === 0) {
-    return { count: 0, mean: NaN, stdDev: NaN, min: NaN, max: NaN };
-  }
-  const count = values.length;
-  const mean = values.reduce((sum, value) => sum + value, 0) / count;
-  let variance = 0;
-  if (count > 1) {
-    variance = values.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) / (count - 1);
-  }
-  const stdDev = count > 1 ? Math.sqrt(Math.max(variance, 0)) : 0;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  return { count, mean, stdDev, min, max };
-}
-
-function computeHistogram(values: number[], desiredBins = 8): HistogramBin[] {
-  if (values.length === 0) return [];
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  if (min === max) {
-    return [{ from: min, to: max, count: values.length }];
-  }
-  const bins = Math.max(1, desiredBins);
-  const width = (max - min) / bins;
-  const histogram = Array.from({ length: bins }, (_, index) => ({
-    from: min + index * width,
-    to: index === bins - 1 ? max : min + (index + 1) * width,
-    count: 0,
-  }));
-  values.forEach((value) => {
-    let idx = Math.floor((value - min) / width);
-    if (idx >= bins) idx = bins - 1;
-    if (idx < 0) idx = 0;
-    histogram[idx].count += 1;
-  });
-  return histogram;
-}
-
-function buildHistogramSvg(values: number[], lsl?: number | null, usl?: number | null): string {
-  const binCount = Math.min(12, Math.max(4, Math.round(Math.sqrt(values.length))));
-  const bins = computeHistogram(values, binCount);
-  if (!bins.length) {
-    return '<div class="chart-empty">No numeric samples for histogram.</div>';
-  }
-  const width = 420;
-  const height = 240;
-  const paddingX = 48;
-  const paddingY = 32;
-  const chartWidth = width - paddingX * 2;
-  const chartHeight = height - paddingY * 2;
-  const maxCount = Math.max(...bins.map((bin) => bin.count), 1);
-  const slotWidth = chartWidth / bins.length;
-  const barWidth = Math.max(slotWidth * 0.7, 6);
-  let bars = "";
-  bins.forEach((bin, index) => {
-    const barHeight = (bin.count / maxCount) * chartHeight;
-    const x = paddingX + slotWidth * index + (slotWidth - barWidth) / 2;
-    const y = paddingY + chartHeight - barHeight;
-    bars += `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${barWidth.toFixed(2)}" height="${barHeight.toFixed(2)}" fill="#6366f1" rx="4" />`;
-    const labelX = paddingX + slotWidth * index + slotWidth / 2;
-    bars += `<text x="${labelX.toFixed(2)}" y="${height - 6}" text-anchor="middle" font-size="11" fill="#475569">${escapeHtml(formatNumber((bin.from + bin.to) / 2, 2))}</text>`;
-  });
-  const axis = `<line x1="${paddingX}" y1="${paddingY + chartHeight}" x2="${paddingX + chartWidth}" y2="${paddingY + chartHeight}" stroke="#94a3b8" stroke-width="1" />` +
-    `<line x1="${paddingX}" y1="${paddingY}" x2="${paddingX}" y2="${paddingY + chartHeight}" stroke="#94a3b8" stroke-width="1" />`;
-  const minValue = bins[0].from;
-  const maxValue = bins[bins.length - 1].to;
-  const range = maxValue - minValue || 1;
-  let specLines = "";
-  if (lsl != null && Number.isFinite(lsl)) {
-    const x = paddingX + ((lsl - minValue) / range) * chartWidth;
-    specLines += `<line x1="${x.toFixed(2)}" y1="${paddingY}" x2="${x.toFixed(2)}" y2="${paddingY + chartHeight}" stroke="#ef4444" stroke-width="2" stroke-dasharray="4 4" />`;
-    specLines += `<text x="${x.toFixed(2)}" y="${paddingY - 8}" text-anchor="middle" font-size="11" fill="#b91c1c">LSL ${escapeHtml(formatNumber(lsl))}</text>`;
-  }
-  if (usl != null && Number.isFinite(usl)) {
-    const x = paddingX + ((usl - minValue) / range) * chartWidth;
-    specLines += `<line x1="${x.toFixed(2)}" y1="${paddingY}" x2="${x.toFixed(2)}" y2="${paddingY + chartHeight}" stroke="#10b981" stroke-width="2" stroke-dasharray="4 4" />`;
-    specLines += `<text x="${x.toFixed(2)}" y="${paddingY - 8}" text-anchor="middle" font-size="11" fill="#047857">USL ${escapeHtml(formatNumber(usl))}</text>`;
-  }
-  const yLabels = [0, maxCount];
-  let yLabelMarkup = "";
-  yLabels.forEach((count) => {
-    const y = paddingY + chartHeight - (count / maxCount) * chartHeight;
-    yLabelMarkup += `<text x="${paddingX - 8}" y="${y.toFixed(2)}" text-anchor="end" font-size="11" fill="#475569">${count}</text>`;
-  });
-  return `<div class="chart-wrapper"><div class="chart-title">Histogram</div><svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Histogram visualization">${axis}${bars}${specLines}${yLabelMarkup}</svg></div>`;
-}
-
-function buildRunChartSvg(points: RunPoint[], lsl?: number | null, usl?: number | null): string {
-  if (!points.length) {
-    return '<div class="chart-empty">No numeric samples for run chart.</div>';
-  }
-  const width = 420;
-  const height = 240;
-  const paddingX = 48;
-  const paddingY = 32;
-  const chartWidth = width - paddingX * 2;
-  const chartHeight = height - paddingY * 2;
-  const values = points.map((point) => point.value);
-  const maxValue = Math.max(...values);
-  const minValue = Math.min(...values);
-  const range = maxValue - minValue || 1;
-  const step = points.length > 1 ? chartWidth / (points.length - 1) : 0;
-  let path = "";
-  let circles = "";
-  points.forEach((point, index) => {
-    const x = paddingX + step * index;
-    const y = paddingY + (maxValue - point.value) / range * chartHeight;
-    path += index === 0 ? `M ${x.toFixed(2)} ${y.toFixed(2)}` : ` L ${x.toFixed(2)} ${y.toFixed(2)}`;
-    circles += `<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="3.5" fill="#2563eb" />`;
-    const label = escapeHtml(point.label);
-    circles += `<text x="${x.toFixed(2)}" y="${height - 6}" text-anchor="middle" font-size="11" fill="#475569" transform="rotate(15 ${x.toFixed(2)} ${height - 6})">${label}</text>`;
-  });
-  const axis = `<line x1="${paddingX}" y1="${paddingY + chartHeight}" x2="${paddingX + chartWidth}" y2="${paddingY + chartHeight}" stroke="#94a3b8" stroke-width="1" />` +
-    `<line x1="${paddingX}" y1="${paddingY}" x2="${paddingX}" y2="${paddingY + chartHeight}" stroke="#94a3b8" stroke-width="1" />`;
-  const yLabels = [maxValue, minValue];
-  let yLabelMarkup = "";
-  yLabels.forEach((value) => {
-    const y = paddingY + (maxValue - value) / range * chartHeight;
-    yLabelMarkup += `<text x="${paddingX - 8}" y="${y.toFixed(2)}" text-anchor="end" font-size="11" fill="#475569">${escapeHtml(formatNumber(value))}</text>`;
-  });
-  const buildSpec = (value: number | null | undefined, label: string, color: string) => {
-    if (value == null || !Number.isFinite(value)) return "";
-    const y = paddingY + (maxValue - value) / range * chartHeight;
-    return `<line x1="${paddingX}" y1="${y.toFixed(2)}" x2="${paddingX + chartWidth}" y2="${y.toFixed(2)}" stroke="${color}" stroke-width="2" stroke-dasharray="4 4" />` +
-      `<text x="${paddingX + chartWidth - 4}" y="${(y - 6).toFixed(2)}" text-anchor="end" font-size="11" fill="${color}">${label} ${escapeHtml(formatNumber(value))}</text>`;
-  };
-  const specLines = `${buildSpec(lsl ?? null, "LSL", "#ef4444")}${buildSpec(usl ?? null, "USL", "#10b981")}`;
-  return `<div class="chart-wrapper"><div class="chart-title">Run Chart</div><svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Run chart">${axis}<path d="${path}" fill="none" stroke="#1d4ed8" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />${circles}${specLines}${yLabelMarkup}</svg></div>`;
-}
-
-function buildGroupSection(group: ExportGroup): string {
-  const numericValues = group.records
-    .map((record) => record.value)
-    .filter((value): value is number => value !== null && Number.isFinite(value));
-  const stats = computeStats(numericValues);
-  const cp = group.lsl != null && group.usl != null && numericValues.length > 1 && stats.stdDev > 0
-    ? (group.usl - group.lsl) / (6 * stats.stdDev)
-    : null;
-  let cpk: number | null = null;
-  if (numericValues.length > 1 && stats.stdDev > 0) {
-    const cpu = group.usl != null && Number.isFinite(group.usl)
-      ? (group.usl - stats.mean) / (3 * stats.stdDev)
-      : null;
-    const cpl = group.lsl != null && Number.isFinite(group.lsl)
-      ? (stats.mean - group.lsl) / (3 * stats.stdDev)
-      : null;
-    if (cpu != null && cpl != null) {
-      cpk = Math.min(cpu, cpl);
-    } else if (cpu != null) {
-      cpk = cpu;
-    } else if (cpl != null) {
-      cpk = cpl;
-    }
-  }
-  const histogramMarkup = numericValues.length >= 2
-    ? buildHistogramSvg(numericValues, group.lsl, group.usl)
-    : '<div class="chart-empty">Not enough numeric samples for histogram.</div>';
-  const runChartPoints: RunPoint[] = group.records
-    .filter((record) => record.value != null && Number.isFinite(record.value))
-    .map((record) => ({ label: record.createdAt, value: record.value as number }));
-  const runChartMarkup = runChartPoints.length >= 2
-    ? buildRunChartSvg(runChartPoints, group.lsl, group.usl)
-    : '<div class="chart-empty">Not enough numeric samples for run chart.</div>';
-  const metricItems: Array<{ label: string; value: string }> = [
-    { label: "Samples", value: String(numericValues.length) },
-    { label: "Mean", value: numericValues.length > 0 ? formatNumber(stats.mean) : "—" },
-    { label: "Std Dev", value: numericValues.length > 1 ? formatNumber(stats.stdDev) : "—" },
-    { label: "Min", value: numericValues.length > 0 ? formatNumber(stats.min) : "—" },
-    { label: "Max", value: numericValues.length > 0 ? formatNumber(stats.max) : "—" },
-    { label: "Cp", value: cp != null && Number.isFinite(cp) ? formatNumber(cp, 2) : "—" },
-    { label: "Cpk", value: cpk != null && Number.isFinite(cpk) ? formatNumber(cpk, 2) : "—" },
-  ];
-  const metaItems: Array<{ label: string; value: string }> = [];
-  if (group.machineName || group.machineCode) {
-    const machineLabel = group.machineName ?? group.machineCode ?? "";
-    const machineCode = group.machineCode && group.machineCode !== group.machineName ? ` (${group.machineCode})` : "";
-    metaItems.push({ label: "Machine", value: `${machineLabel}${machineCode}`.trim() });
-  }
-  if (group.partNumbers && group.partNumbers.length > 0) {
-    const unique = Array.from(new Set(group.partNumbers)).sort((a, b) => a.localeCompare(b));
-    metaItems.push({ label: unique.length > 1 ? "Parts" : "Part", value: unique.join(", ") });
-  }
-  if (group.charKey) {
-    metaItems.push({ label: "Char #", value: group.charKey });
-  }
-  if (group.charName) {
-    metaItems.push({ label: "Characteristic", value: group.charName });
-  }
-  if (group.lsl != null && Number.isFinite(group.lsl)) {
-    metaItems.push({ label: "Lower Spec", value: formatNumber(group.lsl) });
-  }
-  if (group.usl != null && Number.isFinite(group.usl)) {
-    metaItems.push({ label: "Upper Spec", value: formatNumber(group.usl) });
-  }
-  const metricsMarkup = metricItems
-    .map((item) => `<div class="metric-item"><span class="metric-label">${escapeHtml(item.label)}</span><span class="metric-value">${escapeHtml(item.value)}</span></div>`)
-    .join("");
-  const metaMarkup = metaItems.length > 0
-    ? `<div class="section-meta">${metaItems.map((item) => `<span><strong>${escapeHtml(item.label)}:</strong> ${escapeHtml(item.value)}</span>`).join("")}</div>`
-    : "";
-  const rows = group.records.map((record) => {
-    const machineDisplay = record.machineName
-      ? `${record.machineName}${record.machineCode && record.machineCode !== record.machineName ? ` (${record.machineCode})` : ""}`
-      : record.machineCode ?? "";
-    return `<tr><td>${escapeHtml(record.createdAt)}</td><td>${escapeHtml(record.displayValue)}</td><td>${escapeHtml(machineDisplay)}</td><td>${escapeHtml(record.partNumber ?? "")}</td><td>${escapeHtml(record.partName ?? "")}</td><td>${escapeHtml(record.recordNote ?? "")}</td></tr>`;
-  }).join("");
-  const tableMarkup = `<div class="table-wrapper"><table class="data-table"><thead><tr><th>Timestamp</th><th>Measured</th><th>Machine</th><th>Part #</th><th>Part Name</th><th>Record Note</th></tr></thead><tbody>${rows}</tbody></table></div>`;
-  return `<section class="report-section"><h2>${escapeHtml(group.title)}</h2>${group.subtitle ? `<p class="section-subtitle">${escapeHtml(group.subtitle)}</p>` : ""}${metaMarkup}<div class="metrics-grid">${metricsMarkup}</div><div class="chart-grid">${histogramMarkup}${runChartMarkup}</div>${tableMarkup}</section>`;
-}
-
-function generateSpcHtmlReport(title: string, subtitle: string, sections: string[]): string {
-  const generated = new Date().toLocaleString();
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${escapeHtml(title)}</title>
-  <style>
-    :root { color-scheme: light; }
-    body { font-family: 'Inter', 'Segoe UI', Tahoma, sans-serif; background: #f8fafc; color: #0f172a; margin: 0; padding: 24px; }
-    .report-container { max-width: 1280px; margin: 0 auto; }
-    .report-header { margin-bottom: 24px; }
-    .report-header h1 { font-size: 28px; margin: 0 0 8px; }
-    .report-subtitle { margin: 0 0 4px; color: #475569; }
-    .report-generated { margin: 0; font-size: 13px; color: #64748b; }
-    .report-section { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 24px; margin-bottom: 24px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08); }
-    .report-section h2 { margin: 0; font-size: 22px; }
-    .section-subtitle { margin: 6px 0 0; font-size: 14px; color: #475569; }
-    .section-meta { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 16px; font-size: 13px; }
-    .section-meta span { background: #f1f5f9; padding: 6px 10px; border-radius: 999px; border: 1px solid #e2e8f0; }
-    .metrics-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); margin-top: 20px; }
-    .metric-item { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px; }
-    .metric-label { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; }
-    .metric-value { display: block; margin-top: 6px; font-size: 18px; font-weight: 600; color: #0f172a; }
-    .chart-grid { display: grid; gap: 16px; margin: 24px 0; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
-    .chart-wrapper { background: linear-gradient(135deg, #eef2ff 0%, #f8fafc 100%); border-radius: 14px; padding: 16px; border: 1px solid rgba(99, 102, 241, 0.15); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4); }
-    .chart-title { font-size: 14px; font-weight: 600; margin-bottom: 8px; color: #3730a3; letter-spacing: 0.02em; }
-    .chart-empty { font-size: 14px; color: #64748b; padding: 20px; background: #f8fafc; border: 1px dashed #cbd5f5; border-radius: 12px; text-align: center; }
-    .table-wrapper { overflow-x: auto; margin-top: 20px; border-radius: 12px; border: 1px solid #e2e8f0; }
-    .data-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-    .data-table thead { background: #f8fafc; }
-    .data-table th, .data-table td { padding: 10px 12px; border-bottom: 1px solid #e2e8f0; text-align: left; }
-    .data-table tbody tr:nth-child(even) { background: #f9fafb; }
-    @media print {
-      body { background: #ffffff; padding: 0; }
-      .report-section { box-shadow: none; }
-      .chart-wrapper { break-inside: avoid; }
-    }
-  </style>
-</head>
-<body>
-  <main class="report-container">
-    <header class="report-header">
-      <h1>${escapeHtml(title)}</h1>
-      <p class="report-subtitle">${escapeHtml(subtitle)}</p>
-      <p class="report-generated">Generated ${escapeHtml(generated)}</p>
-    </header>
-    ${sections.join("")}
-  </main>
-</body>
-</html>`;
-}
-
-function downloadHtmlReport(filename: string, html: string) {
-  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+function downloadCsv(filename: string, csv: string) {
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -361,6 +45,52 @@ function downloadHtmlReport(filename: string, html: string) {
   document.body.removeChild(link);
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+function parseCsv(text: string): Record<string, string>[] {
+  const lines = text.split(/\r?\n/).filter((line) => line.trim());
+  if (lines.length < 2) return [];
+  const parseRow = (line: string): string[] => {
+    const fields: string[] = [];
+    let current = "";
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (inQuotes) {
+        if (ch === '"' && line[i + 1] === '"') {
+          current += '"';
+          i++;
+        } else if (ch === '"') {
+          inQuotes = false;
+        } else {
+          current += ch;
+        }
+      } else {
+        if (ch === '"') {
+          inQuotes = true;
+        } else if (ch === ",") {
+          fields.push(current.trim());
+          current = "";
+        } else {
+          current += ch;
+        }
+      }
+    }
+    fields.push(current.trim());
+    return fields;
+  };
+  const headers = parseRow(lines[0]);
+  const rows: Record<string, string>[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const values = parseRow(lines[i]);
+    const row: Record<string, string> = {};
+    headers.forEach((h, idx) => {
+      row[h] = values[idx] || "";
+    });
+    rows.push(row);
+  }
+  return rows;
+}
+
 export default function SpcData() {
   const { toast } = useToast();
   const [openNew, setOpenNew] = useState(false);
@@ -378,6 +108,7 @@ export default function SpcData() {
   const [charNumber, setCharNumber] = useState('');
   const [charMax, setCharMax] = useState('');
   const [charMin, setCharMin] = useState('');
+  const [opName, setOpName] = useState('');
   const [partNumber, setPartNumber] = useState('');
   const [partSelect, setPartSelect] = useState<string | undefined>(undefined);
   const [partName, setPartName] = useState('');
@@ -442,13 +173,13 @@ export default function SpcData() {
     if (!search) return;
     const s = search.toString().toLowerCase();
     const match = (findings || []).find(f => {
-      const key = ((f as any).charNumber || (f as any).charName || f.characteristic || '').toString().toLowerCase();
+      const key = ((f as any).charNumber || (f as any).charName || '').toString().toLowerCase();
       return key === s;
     });
     if (match) {
       const pn = ((match as any).partNumber || null);
       if (pn) setExpandedParts(new Set([pn]));
-      const key = ((match as any).charNumber || (match as any).charName || match.characteristic || '').toString();
+      const key = ((match as any).charNumber || (match as any).charName || '').toString();
       if (key) setExpandedChars(new Set([key]));
     }
   }, [search, findings]);
@@ -477,7 +208,7 @@ export default function SpcData() {
     const map = new Map<string, any>();
     (findings || []).forEach(f => {
       const num = ((f as any).charNumber || '').toString();
-      const name = (f as any).charName || f.characteristic || '';
+      const name = (f as any).charName || '';
       const key = num || name || '(unknown)';
       if (!map.has(key)) {
         map.set(key, { charNumber: num || '', charName: name || '', charMax: (f as any).charMax || '', charMin: (f as any).charMin || '', partNumber: (f as any).partNumber || '', partName: (f as any).partName || '' });
@@ -503,7 +234,7 @@ export default function SpcData() {
   const findingsByCharacteristic = useMemo(() => {
     const byChar: Record<string, AuditFinding[]> = {};
     (filteredFindings || []).forEach(f => {
-      const key = ((f as any).charNumber || (f as any).charName || f.characteristic || '(unknown)').toString();
+      const key = ((f as any).charNumber || (f as any).charName || '(unknown)').toString();
       if (!byChar[key]) byChar[key] = [];
       byChar[key].push(f);
     });
@@ -528,13 +259,13 @@ export default function SpcData() {
       const chars = Object.keys(findingsByPart[filterPartNumber] || {}).length ? Object.keys((() => {
         const g: Record<string, AuditFinding[]> = {};
         (findingsByPart[filterPartNumber] || []).forEach(f => {
-          const k = ((f as any).charNumber || (f as any).charName || f.characteristic || '(unknown)').toString();
+          const k = ((f as any).charNumber || (f as any).charName || '(unknown)').toString();
           if (!g[k]) g[k] = [];
           g[k].push(f);
         });
         return g;
       })()) : Object.keys(findingsByCharacteristic).filter(k => (findingsByPart[filterPartNumber] || []).some(f => {
-        const key = ((f as any).charNumber || (f as any).charName || f.characteristic || '(unknown)').toString();
+        const key = ((f as any).charNumber || (f as any).charName || '(unknown)').toString();
         return key === k;
       }));
       if (chars && chars.length > 0) setExpandedChars(new Set(chars));
@@ -550,7 +281,7 @@ export default function SpcData() {
         const chars = Object.keys((() => {
           const g: Record<string, AuditFinding[]> = {};
           (items || []).forEach(f => {
-            const k = ((f as any).charNumber || (f as any).charName || f.characteristic || '(unknown)').toString();
+            const k = ((f as any).charNumber || (f as any).charName || '(unknown)').toString();
             if (!g[k]) g[k] = [];
             g[k].push(f);
           });
@@ -614,6 +345,7 @@ export default function SpcData() {
   const [editPartSelect, setEditPartSelect] = useState<string | undefined>(undefined);
   const [editCharMax, setEditCharMax] = useState('');
   const [editCharMin, setEditCharMin] = useState('');
+  const [editOpName, setEditOpName] = useState('');
   const [hoveredRowId, setHoveredRowId] = useState<string | null>(null);
   const startEdit = (f: AuditFinding) => {
     setEditingFinding(f);
@@ -624,16 +356,16 @@ export default function SpcData() {
       setUseCustomChar(false);
       setCharacSelect(charNum);
       setCharNumber(charNum);
-      const name = (f as any).charName || f.characteristic || '';
+      const name = (f as any).charName || '';
       setCharac(name);
     } else {
       setUseCustomChar(true);
       setCharacSelect('__custom');
-      const name = (f as any).charName || f.characteristic || '';
+      const name = (f as any).charName || '';
       setCharac(name || '');
     }
     setMeasured(f.measuredValue);
-    setCorrectiveAction(f.correctiveAction || "");
+    setCorrectiveAction((f as any).recordNote || "");
     setStatus((f as any).status === 'closed' ? 'closed' : 'open');
     setPartNumber((f as any).partNumber || "");
     setPartName((f as any).partName || "");
@@ -683,161 +415,102 @@ export default function SpcData() {
     return Object.entries(findingsByPart) as [string, AuditFinding[]][];
   })();
 
-  const exportByCharacteristic = useCallback(() => {
+  const importCsvRef = useRef<HTMLInputElement>(null);
+
+  const exportCsv = useCallback(() => {
     const records = Array.isArray(findings) ? findings : [];
     if (records.length === 0) {
       toast({ title: "Nothing to export", description: "No SPC records are available yet." });
       return;
     }
-    const groups = new Map<string, ExportGroup>();
-    records.forEach((record) => {
-      const partNumber = ((record as any).partNumber || "").toString();
-      const partName = ((record as any).partName || "").toString();
-      const charKey = ((record as any).charNumber || (record as any).charName || record.characteristic || "(unknown)").toString();
-      const charName = ((record as any).charName || record.characteristic || "").toString();
-      const groupKey = `${partNumber || "(no-part)"}::${charKey}`;
-      let group = groups.get(groupKey);
-      if (!group) {
-        const descriptor = [charName, partName].filter(Boolean).join(" • ");
-        group = {
-          id: groupKey,
-          title: `${partNumber || "Unspecified Part"} • Char ${charKey}`,
-          subtitle: descriptor || undefined,
-          lsl: toNumber((record as any).charMin),
-          usl: toNumber((record as any).charMax),
-          charKey,
-          charName,
-          partNumbers: partNumber ? [partNumber] : [],
-          records: [],
-        };
-        groups.set(groupKey, group);
-      }
-      if (partNumber) {
-        group.partNumbers = group.partNumbers || [];
-        if (!group.partNumbers.includes(partNumber)) {
-          group.partNumbers.push(partNumber);
-        }
-      }
-      if (group.lsl == null) {
-        const maybeLsl = toNumber((record as any).charMin);
-        if (maybeLsl != null) group.lsl = maybeLsl;
-      }
-      if (group.usl == null) {
-        const maybeUsl = toNumber((record as any).charMax);
-        if (maybeUsl != null) group.usl = maybeUsl;
-      }
-      const numericValue = toNumber(record.measuredValue);
+    const headers = ["MachineCode", "MachineName", "PartNumber", "PartName", "CharNumber", "CharName", "OpName", "CharMax", "CharMin", "MeasuredValue", "RecordNote", "Timestamp"];
+    const rows = records.map((record) => {
       const machine = machineById[record.machineId];
-      group.records.push({
-        value: numericValue,
-        displayValue: record.measuredValue,
-        createdAt: new Date(record.createdAt).toLocaleString(),
-        recordNote: (record as any).recordNote ?? record.correctiveAction ?? "",
-        machineName: machine?.name || "",
-        machineCode: machine?.machineId || record.machineId,
-        partNumber,
-        partName,
-      });
+      return buildCsvRow([
+        machine?.machineId || record.machineId,
+        machine?.name || "",
+        (record as any).partNumber || "",
+        (record as any).partName || "",
+        (record as any).charNumber || "",
+        (record as any).charName || "",
+        (record as any).opName || "",
+        (record as any).charMax || "",
+        (record as any).charMin || "",
+        record.measuredValue,
+        (record as any).recordNote ?? "",
+        record.createdAt,
+      ]);
     });
-    if (groups.size === 0) {
-      toast({ title: "Nothing to export", description: "SPC records are missing numeric measurements." });
-      return;
-    }
-    const sections = Array.from(groups.values())
-      .sort((a, b) => a.title.localeCompare(b.title))
-      .map((group) => buildGroupSection(group));
-    const html = generateSpcHtmlReport(
-      "SPC Export — Characteristics",
-      `Grouped by part and characteristic. Total groups: ${groups.size}.`,
-      sections
-    );
-    downloadHtmlReport(`spc-characteristics-${Date.now()}.html`, html);
-    toast({
-      title: "Export ready",
-      description: `Saved ${groups.size} characteristic group${groups.size === 1 ? "" : "s"}.`,
-    });
+    const csv = [headers.join(","), ...rows].join("\n");
+    downloadCsv(`spc-export-${Date.now()}.csv`, csv);
+    toast({ title: "Export ready", description: `Exported ${records.length} record${records.length === 1 ? "" : "s"} to CSV.` });
   }, [findings, machineById, toast]);
 
-  const exportByOperation = useCallback(() => {
-    const records = Array.isArray(findings) ? findings : [];
-    if (records.length === 0) {
-      toast({ title: "Nothing to export", description: "No SPC records are available yet." });
-      return;
-    }
-    const groups = new Map<string, ExportGroup>();
-    records.forEach((record) => {
-      const machine = machineById[record.machineId];
-      const machineName = machine?.name || record.machineId;
-      const machineCode = machine?.machineId || record.machineId;
-      const charKey = ((record as any).charNumber || (record as any).charName || record.characteristic || "(unknown)").toString();
-      const charName = ((record as any).charName || record.characteristic || "").toString();
-      const partNumber = ((record as any).partNumber || "").toString();
-      const partName = ((record as any).partName || "").toString();
-      const groupKey = `${record.machineId}::${charKey}`;
-      let group = groups.get(groupKey);
-      if (!group) {
-        group = {
-          id: groupKey,
-          title: `${machineName} — Char ${charKey}`,
-          subtitle: charName || undefined,
-          lsl: toNumber((record as any).charMin),
-          usl: toNumber((record as any).charMax),
-          charKey,
-          charName,
-          machineName,
-          machineCode,
-          partNumbers: partNumber ? [partNumber] : [],
-          records: [],
-        };
-        groups.set(groupKey, group);
+  const importCsv = useCallback(async (file: File) => {
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text);
+      if (rows.length === 0) {
+        toast({ title: "Empty file", description: "The CSV file has no data rows.", variant: "destructive" });
+        return;
       }
-      if (partNumber) {
-        group.partNumbers = group.partNumbers || [];
-        if (!group.partNumbers.includes(partNumber)) {
-          group.partNumbers.push(partNumber);
-        }
-      }
-      if (group.lsl == null) {
-        const maybeLsl = toNumber((record as any).charMin);
-        if (maybeLsl != null) group.lsl = maybeLsl;
-      }
-      if (group.usl == null) {
-        const maybeUsl = toNumber((record as any).charMax);
-        if (maybeUsl != null) group.usl = maybeUsl;
-      }
-      const numericValue = toNumber(record.measuredValue);
-      group.records.push({
-        value: numericValue,
-        displayValue: record.measuredValue,
-        createdAt: new Date(record.createdAt).toLocaleString(),
-        recordNote: (record as any).recordNote ?? record.correctiveAction ?? "",
-        machineName,
-        machineCode,
-        partNumber,
-        partName,
+      // Build machine lookup by machineId code
+      const machineByCode: Record<string, Machine> = {};
+      (machines || []).forEach((m) => {
+        if (m.machineId) machineByCode[m.machineId.toLowerCase()] = m;
       });
-    });
-    if (groups.size === 0) {
-      toast({ title: "Nothing to export", description: "SPC records are missing numeric measurements." });
-      return;
+      const payloads: any[] = [];
+      const errors: string[] = [];
+      rows.forEach((row, idx) => {
+        const machineCode = (row.MachineCode || "").trim();
+        const machine = machineByCode[machineCode.toLowerCase()];
+        if (!machine) {
+          errors.push(`Row ${idx + 2}: Unknown MachineCode "${machineCode}"`);
+          return;
+        }
+        const charName = (row.CharName || "").trim();
+        const charNumber = (row.CharNumber || "").trim();
+        if (!charName && !charNumber) {
+          errors.push(`Row ${idx + 2}: CharName or CharNumber required`);
+          return;
+        }
+        const measuredValue = (row.MeasuredValue || "").trim();
+        if (!measuredValue) {
+          errors.push(`Row ${idx + 2}: MeasuredValue required`);
+          return;
+        }
+        payloads.push({
+          machineId: machine.id,
+          characteristic: charName || charNumber,
+          charNumber: charNumber || undefined,
+          charName: charName || undefined,
+          charMax: (row.CharMax || "").trim() || undefined,
+          charMin: (row.CharMin || "").trim() || undefined,
+          opName: (row.OpName || "").trim() || undefined,
+          partNumber: (row.PartNumber || "").trim() || undefined,
+          partName: (row.PartName || "").trim() || undefined,
+          measuredValue,
+          correctiveAction: (row.RecordNote || "").trim() || undefined,
+        });
+      });
+      if (errors.length > 0 && payloads.length === 0) {
+        toast({ title: "Import failed", description: errors.slice(0, 3).join("; "), variant: "destructive" });
+        return;
+      }
+      // Send bulk import
+      await apiRequest("POST", "/api/bulk-findings", { findings: payloads });
+      queryClient.invalidateQueries({ queryKey: ["/api/audit-findings"] });
+      const msg = errors.length > 0
+        ? `Imported ${payloads.length} records. ${errors.length} row${errors.length === 1 ? "" : "s"} skipped.`
+        : `Imported ${payloads.length} record${payloads.length === 1 ? "" : "s"}.`;
+      toast({ title: "Import complete", description: msg });
+    } catch (err) {
+      toast({ title: "Import failed", description: "Failed to process CSV file.", variant: "destructive" });
     }
-    const sections = Array.from(groups.values())
-      .sort((a, b) => a.title.localeCompare(b.title))
-      .map((group) => buildGroupSection(group));
-    const html = generateSpcHtmlReport(
-      "SPC Export — Operations",
-      `Grouped by machine and characteristic. Total groups: ${groups.size}.`,
-      sections
-    );
-    downloadHtmlReport(`spc-operations-${Date.now()}.html`, html);
-    toast({
-      title: "Export ready",
-      description: `Saved ${groups.size} machine group${groups.size === 1 ? "" : "s"}.`,
-    });
-  }, [findings, machineById, toast]);
+  }, [machines, toast]);
 
   return (
-    <div className="p-6">
+    <div className="p-6 h-full overflow-y-auto">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="text-lg font-semibold">SPC Data</h2>
@@ -849,8 +522,9 @@ export default function SpcData() {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={exportByCharacteristic}>Export by Characteristic</Button>
-          <Button variant="outline" onClick={exportByOperation}>Export by Operation</Button>
+          <Button variant="outline" onClick={exportCsv}>Export CSV</Button>
+          <Button variant="outline" onClick={() => importCsvRef.current?.click()}>Import CSV</Button>
+          <input ref={importCsvRef} type="file" accept=".csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) { importCsv(f); e.target.value = ""; } }} />
           <Button onClick={() => openNewFor()}>New SPC Record</Button>
         </div>
       </div>
@@ -868,7 +542,7 @@ export default function SpcData() {
             // group by characteristic/charNumber within this part
             const charGroups: Record<string, AuditFinding[]> = {};
             partItems.forEach(f => {
-              const key = ((f as any).charNumber || (f as any).charName || f.characteristic || '(unknown)').toString();
+              const key = ((f as any).charNumber || (f as any).charName || '(unknown)').toString();
               if (!charGroups[key]) charGroups[key] = [];
               charGroups[key].push(f);
             });
@@ -909,8 +583,11 @@ export default function SpcData() {
                                 <div className="flex items-center justify-between w-full cursor-pointer group">
                                   <div className="flex flex-col">
                                     <span className="text-base font-semibold">Char #: {charKey}</span>
-                                    {((first as any).charName || first.characteristic) ? (
-                                      <span className="text-sm text-muted-foreground mt-1">{(first as any).charName || first.characteristic}</span>
+                                    {(first as any).charName ? (
+                                      <span className="text-sm text-muted-foreground mt-1">{(first as any).charName}</span>
+                                    ) : null}
+                                    {(first as any).opName ? (
+                                      <span className="text-sm text-muted-foreground">Op: {(first as any).opName}</span>
                                     ) : null}
                                     <div className="flex items-center gap-4 text-sm text-muted-foreground mt-2">
                                       {!minIsZero && <span>Nominal: {nominal || '-'}</span>}
@@ -919,7 +596,8 @@ export default function SpcData() {
                                     </div>
                                   </div>
                                   <div className="flex items-center gap-2">
-                                    <Button className="opacity-0 group-hover:opacity-100 transition-opacity" size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); const key = charKey; const first = items[0]; if (first) { setEditingCharacteristicKey(key); setEditCharNumber((first as any).charNumber || ''); setEditCharName((first as any).charName || first.characteristic || ''); setEditPartNumber((first as any).partNumber || ''); setEditPartSelect((first as any).partNumber || '__custom'); setEditPartName((first as any).partName || ''); setEditCharMax((first as any).charMax || ''); setEditCharMin((first as any).charMin || ''); setEditCharOpen(true); } }}>Edit Characteristic</Button>
+                                    <Button className="opacity-0 group-hover:opacity-100 transition-opacity" size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); exportSpcHtml({ charNumber: first.charNumber || charKey, charName: first.charName || '', partNumber: first.partNumber || partNumber || '', partName: first.partName || partName || '', opName: first.opName || '', records: items.map((r: any) => ({ machineId: r.machineId, machineName: machineById[r.machineId]?.name || machineById[r.machineId]?.machineId || r.machineId, measuredValue: r.measuredValue, charMax: r.charMax, charMin: r.charMin, createdAt: r.createdAt, recordNote: r.recordNote || '' })) }); }}>Print SPC</Button>
+                                    <Button className="opacity-0 group-hover:opacity-100 transition-opacity" size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); const key = charKey; const first = items[0]; if (first) { setEditingCharacteristicKey(key); setEditCharNumber((first as any).charNumber || ''); setEditCharName((first as any).charName || ''); setEditPartNumber((first as any).partNumber || ''); setEditPartSelect((first as any).partNumber || '__custom'); setEditPartName((first as any).partName || ''); setEditCharMax((first as any).charMax || ''); setEditCharMin((first as any).charMin || ''); setEditOpName((first as any).opName || ''); setEditCharOpen(true); } }}>Edit Characteristic</Button>
                                     <Badge variant="outline">{items.length}</Badge>
                                   </div>
                                 </div>
@@ -973,7 +651,7 @@ export default function SpcData() {
                                             <td className="p-2 text-xs text-muted-foreground">{(it as any).charMin ?? '-'}</td>
                                             <td className="p-2">{deviationDisplay}</td>
                                             <td className="p-2">{outOfTolDisplay}</td>
-                                            <td className="p-2">{(it as any).recordNote || it.correctiveAction || '-'}</td>
+                                            <td className="p-2">{(it as any).recordNote || '-'}</td>
                                             <td className="p-2 text-right">
                                               <div className="inline-flex gap-2 items-center">
                                                 <button
@@ -1030,6 +708,10 @@ export default function SpcData() {
                 <label className="text-xs text-muted-foreground">Characteristic Name</label>
                 <Input value={editCharName} onChange={(e) => setEditCharName(e.target.value)} />
               </div>
+              <div>
+                <label className="text-xs text-muted-foreground">Op Name</label>
+                <Input value={editOpName} onChange={(e) => setEditOpName(e.target.value)} />
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-muted-foreground">Char Max</label>
@@ -1078,17 +760,26 @@ export default function SpcData() {
                 <Button onClick={async () => {
                   if (!editingCharacteristicKey) return;
                   const items = findingsByCharacteristic[editingCharacteristicKey] || [];
+                  const firstItem = items[0] as any;
+                  if (!firstItem) return;
                   try {
-                    await Promise.all(items.map(it => {
-                      const payload: any = {};
-                      if (editCharName) payload.charName = editCharName;
-                      if (editCharNumber) payload.charNumber = editCharNumber;
-                      if (editCharMax) payload.charMax = editCharMax;
-                      if (editCharMin) payload.charMin = editCharMin;
-                      if (editPartNumber) payload.partNumber = editPartNumber;
-                      if (editPartName) payload.partName = editPartName;
-                      return apiRequest('PATCH', `/api/findings/${it.id}`, payload);
-                    }));
+                    // 3NF: update the single characteristic row
+                    const charPayload: any = {};
+                    if (editCharName) charPayload.charName = editCharName;
+                    if (editCharNumber) charPayload.charNumber = editCharNumber;
+                    if (editCharMax) charPayload.charMax = editCharMax;
+                    if (editCharMin) charPayload.charMin = editCharMin;
+                    if (editOpName !== undefined) charPayload.opName = editOpName || null;
+                    if (firstItem.characteristicId) {
+                      await apiRequest('PATCH', `/api/characteristics/${firstItem.characteristicId}`, charPayload);
+                    }
+                    // Update part if changed
+                    if (firstItem.partId && (editPartNumber || editPartName)) {
+                      const partPayload: any = {};
+                      if (editPartNumber) partPayload.partNumber = editPartNumber;
+                      if (editPartName) partPayload.partName = editPartName;
+                      await apiRequest('PATCH', `/api/parts/${firstItem.partId}`, partPayload);
+                    }
                     queryClient.invalidateQueries({ queryKey: ['/api/audit-findings'] });
                     setEditCharOpen(false);
                     setEditingCharacteristicKey(null);
@@ -1202,6 +893,11 @@ export default function SpcData() {
               <div>
                 <label className="text-xs text-muted-foreground">Char Name</label>
                 <Input value={charac} onChange={(e) => setCharac(e.target.value)} disabled={!useCustomChar} readOnly={!useCustomChar} />
+              </div>
+
+              <div>
+                <label className="text-xs text-muted-foreground">Op Name</label>
+                <Input value={opName} onChange={(e) => setOpName(e.target.value)} placeholder="e.g. OP 10" />
               </div>
 
               <div>
@@ -1331,7 +1027,7 @@ export default function SpcData() {
                     if (!selMachine) return toast({ title: 'Select a machine', variant: 'destructive' });
                     if (!charac || !charac.trim()) return toast({ title: 'Characteristic is required', variant: 'destructive' });
                     if (!measured || !measured.trim()) return toast({ title: 'Measured value is required', variant: 'destructive' });
-                    const payload = { machineId: selMachine, characteristic: charac.trim(), charNumber: charNumber.trim() || undefined, charName: charac.trim() || undefined, charMax: charMax.trim() || undefined, charMin: charMin.trim() || undefined, partNumber: partNumber.trim() || undefined, partName: partName.trim() || undefined, measuredValue: measured.trim(), correctiveAction: correctiveAction.trim() || undefined, status };
+                    const payload = { machineId: selMachine, characteristic: charac.trim(), charNumber: charNumber.trim() || undefined, charName: charac.trim() || undefined, charMax: charMax.trim() || undefined, charMin: charMin.trim() || undefined, partNumber: partNumber.trim() || undefined, partName: partName.trim() || undefined, measuredValue: measured.trim(), correctiveAction: correctiveAction.trim() || undefined, opName: opName.trim() || undefined, status };
                     if (editingFinding) {
                       updateFindingMutation.mutate({ id: editingFinding.id, ...payload });
                       setEditingFinding(null);
