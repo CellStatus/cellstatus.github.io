@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import type { HTMLAttributes } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -174,6 +175,42 @@ export default function Dashboard() {
   const { data: vsmConfigurations = [], isLoading: vsmLoading } = useQuery<VsmConfiguration[]>({
     queryKey: ["/api/vsm-configurations"],
   });
+
+  const goToSpcData = useCallback((params?: Record<string, string | number | undefined>) => {
+    let target = "/spc-data";
+    if (params) {
+      const search = new URLSearchParams();
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== "") {
+          search.set(key, String(value));
+        }
+      });
+      let hasEntries = false;
+      search.forEach(() => {
+        hasEntries = true;
+      });
+      if (hasEntries) {
+        target = `${target}?${search.toString()}`;
+      }
+    }
+    setLocation(target);
+  }, [setLocation]);
+
+  const clickableCardProps = useCallback(
+    (handler: () => void): HTMLAttributes<HTMLDivElement> => ({
+      onClick: handler,
+      onKeyDown: (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          handler();
+        }
+      },
+      role: "button",
+      tabIndex: 0,
+      className: "cursor-pointer transition hover:-translate-y-[1px] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
+    }),
+    []
+  );
 
   
 
@@ -432,7 +469,7 @@ export default function Dashboard() {
                 ME Companion
               </h1>
               <p className="text-sm text-muted-foreground mt-1">
-                Manage machines, SPC data, and value stream maps
+                Manage machines, Capture SPC data, and Build Value Stream Maps
               </p>
             </div>
           </div>
@@ -443,7 +480,9 @@ export default function Dashboard() {
       <div className="flex-1 p-6 space-y-6">
         {/* Summary Cards */}
         <div className="grid gap-4 grid-cols-1 md:grid-cols-6">
-          <Card>
+          <Card
+            {...clickableCardProps(() => goToSpcData())}
+          >
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 Total SPC Records
@@ -453,14 +492,16 @@ export default function Dashboard() {
               <div className="text-3xl font-bold">{totalFindings}</div>
               <p className="text-xs text-muted-foreground">all-time SPC records</p>
               <div className="mt-3">
-                <Button size="sm" onClick={() => setLocation('/spc-data?openNew=1')}>
+                <Button size="sm" onClick={(e) => { e.stopPropagation(); setLocation('/spc-data?openNew=1'); }}>
                   <Plus className="mr-2 h-3 w-3" />
                   New SPC Record
                 </Button>
               </div>
             </CardContent>
           </Card>
-          <Card>
+          <Card
+            {...clickableCardProps(() => goToSpcData())}
+          >
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 Last 7 Days
@@ -471,7 +512,9 @@ export default function Dashboard() {
               <p className="text-xs text-muted-foreground">SPC records in last 7 days</p>
             </CardContent>
           </Card>
-          <Card>
+          <Card
+            {...clickableCardProps(() => goToSpcData({ status: 'closed' }))}
+          >
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 Closed Records
@@ -481,7 +524,16 @@ export default function Dashboard() {
               <div className="text-3xl font-bold text-green-600">{openClosedCounts.closed}</div>
             </CardContent>
           </Card>
-          <Card>
+          <Card
+            {...clickableCardProps(() => {
+              const topMachine = machinesWithMostOpen[0];
+              if (topMachine) {
+                goToSpcData({ machineId: topMachine.id });
+              } else {
+                goToSpcData();
+              }
+            })}
+          >
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 Most Records by Machine
@@ -493,7 +545,7 @@ export default function Dashboard() {
               ) : (
                 <div className="space-y-1">
                   {machinesWithMostOpen.map(m => (
-                    <button key={m.id} onClick={() => setLocation(`/spc-data?machineId=${encodeURIComponent(m.id)}`)} className="w-full flex items-center justify-between text-left">
+                    <button key={m.id} onClick={(event) => { event.stopPropagation(); setLocation(`/spc-data?machineId=${encodeURIComponent(m.id)}`); }} className="w-full flex items-center justify-between text-left">
                       <div className="text-sm">{m.name}{m.machineIdValue ? ` (...${String(m.machineIdValue).slice(-3)})` : ''}</div>
                       <div className="text-right">
                         <div className="font-bold text-lg">{m.count}</div>
@@ -508,7 +560,16 @@ export default function Dashboard() {
               )}
             </CardContent>
           </Card>
-          <Card>
+          <Card
+            {...clickableCardProps(() => {
+              const topPart = topParts[0];
+              if (topPart) {
+                goToSpcData({ partNumber: topPart.key });
+              } else {
+                goToSpcData();
+              }
+            })}
+          >
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 Most Records by Part
@@ -520,7 +581,7 @@ export default function Dashboard() {
               ) : (
                 <div className="space-y-1">
                   {topParts.map(p => (
-                    <button key={p.key} onClick={() => setLocation(`/spc-data?partNumber=${encodeURIComponent(p.key)}`)} className="w-full flex items-center justify-between text-left">
+                    <button key={p.key} onClick={(event) => { event.stopPropagation(); setLocation(`/spc-data?partNumber=${encodeURIComponent(p.key)}`); }} className="w-full flex items-center justify-between text-left">
                       <div className="min-w-0">
                         <div className="text-sm truncate">{p.key}</div>
                         {p.name && (
@@ -536,7 +597,9 @@ export default function Dashboard() {
               )}
             </CardContent>
           </Card>
-          <Card>
+          <Card
+            {...clickableCardProps(() => setLocation('/vsm-builder'))}
+          >
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 Saved VSMs
