@@ -101,6 +101,8 @@ type TimeRangeMetrics = {
   totalQuantity: number;
 };
 
+type TrendGranularity = "day" | "week" | "month";
+
 export default function Dashboard() {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
@@ -111,6 +113,7 @@ export default function Dashboard() {
   const [deletingMachineId, setDeletingMachineId] = useState<string | null>(null);
   const [expandedCells, setExpandedCells] = useState<Set<string>>(new Set());
   const [isExportingReport, setIsExportingReport] = useState(false);
+  const [trendGranularity, setTrendGranularity] = useState<TrendGranularity>("day");
 
   // Fetch machines
   const { data: machines = [], isLoading: machinesLoading } = useQuery<Machine[]>({
@@ -461,16 +464,58 @@ export default function Dashboard() {
   const scrapCostTrendChart = useMemo(() => {
     const now = new Date();
     const currentYear = now.getFullYear();
-    const months = Array.from({ length: 12 }, (_, index) => {
-      const date = new Date(now.getFullYear(), now.getMonth() - (11 - index), 1);
-      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-      const label = date.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
-      return { key, label, year: date.getFullYear() };
+    const startOfDay = (date: Date) =>
+      new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const startOfWeek = (date: Date) => {
+      const day = (date.getDay() + 6) % 7;
+      const monday = new Date(date);
+      monday.setDate(date.getDate() - day);
+      return startOfDay(monday);
+    };
+    const startOfMonth = (date: Date) =>
+      new Date(date.getFullYear(), date.getMonth(), 1);
+    const toIsoDate = (date: Date) => {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, "0");
+      const d = String(date.getDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    };
+    const getPeriodStart = (date: Date) => {
+      if (trendGranularity === "day") return startOfDay(date);
+      if (trendGranularity === "week") return startOfWeek(date);
+      return startOfMonth(date);
+    };
+    const formatPeriodLabel = (date: Date) => {
+      if (trendGranularity === "day") {
+        return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      }
+      if (trendGranularity === "week") {
+        return `Wk ${date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+      }
+      return date.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
+    };
+
+    const bucketCount = trendGranularity === "day" ? 14 : 12;
+    const periods = Array.from({ length: bucketCount }, (_, index) => {
+      const stepsBack = bucketCount - 1 - index;
+      const anchor = new Date(now);
+      if (trendGranularity === "day") {
+        anchor.setDate(anchor.getDate() - stepsBack);
+      } else if (trendGranularity === "week") {
+        anchor.setDate(anchor.getDate() - stepsBack * 7);
+      } else {
+        anchor.setMonth(anchor.getMonth() - stepsBack, 1);
+      }
+      const start = getPeriodStart(anchor);
+      return {
+        key: toIsoDate(start),
+        label: formatPeriodLabel(start),
+        year: start.getFullYear(),
+      };
     });
 
-    const monthSet = new Set(months.map((month) => month.key));
-    const monthTotals = new Map<string, number>();
-    const monthPartTotals = new Map<string, Map<string, number>>();
+    const periodSet = new Set(periods.map((period) => period.key));
+    const periodPartTotals = new Map<string, Map<string, number>>();
     const partTotals = new Map<string, number>();
 
     const resolveIncidentDate = (incident: ScrapIncident) => {
@@ -484,19 +529,18 @@ export default function Dashboard() {
       const incidentDate = resolveIncidentDate(incident);
       if (!incidentDate) return;
 
-      const monthKey = `${incidentDate.getFullYear()}-${String(incidentDate.getMonth() + 1).padStart(2, "0")}`;
-      if (!monthSet.has(monthKey)) return;
+      const periodKey = toIsoDate(getPeriodStart(incidentDate));
+      if (!periodSet.has(periodKey)) return;
 
       const partNumber = incident.partId ? (partById.get(incident.partId)?.partNumber || "Unknown Part") : "Unassigned";
       const incidentCost = Number(incident.estimatedCost || 0);
 
-      monthTotals.set(monthKey, (monthTotals.get(monthKey) || 0) + incidentCost);
       partTotals.set(partNumber, (partTotals.get(partNumber) || 0) + incidentCost);
 
-      if (!monthPartTotals.has(monthKey)) {
-        monthPartTotals.set(monthKey, new Map());
+      if (!periodPartTotals.has(periodKey)) {
+        periodPartTotals.set(periodKey, new Map());
       }
-      const partCostMap = monthPartTotals.get(monthKey)!;
+      const partCostMap = periodPartTotals.get(periodKey)!;
       partCostMap.set(partNumber, (partCostMap.get(partNumber) || 0) + incidentCost);
     });
 
@@ -514,10 +558,9 @@ export default function Dashboard() {
 
     const cumulativeRunningTotals = new Map<string, number>();
 
-    const chartData = months.map((month) => {
+    const chartData = periods.map((period) => {
       const row: Record<string, string | number> = {
-        period: month.label,
-        totalCost: monthTotals.get(month.key) || 0,
+        period: period.label,
         other: 0,
       };
 
@@ -526,7 +569,7 @@ export default function Dashboard() {
         row[`part${index + 1}Cumulative`] = null as unknown as number;
       });
 
-      const partCostMap = monthPartTotals.get(month.key);
+      const partCostMap = periodPartTotals.get(period.key);
       if (partCostMap) {
         partCostMap.forEach((cost, partNumber) => {
           const partKey = partKeyByNumber.get(partNumber);
@@ -543,7 +586,7 @@ export default function Dashboard() {
         const cumulativeKey = cumulativeKeyByNumber.get(partNumber);
         if (!monthlyKey || !cumulativeKey) return;
 
-        if (month.year === currentYear) {
+        if (period.year === currentYear) {
           const nextValue = (cumulativeRunningTotals.get(partNumber) || 0) + Number(row[monthlyKey] || 0);
           cumulativeRunningTotals.set(partNumber, nextValue);
           row[cumulativeKey] = nextValue;
@@ -562,11 +605,12 @@ export default function Dashboard() {
       "hsl(var(--chart-4))",
       "hsl(var(--chart-5))",
     ];
+    const periodLabel = trendGranularity === "day" ? "Daily" : trendGranularity === "week" ? "Weekly" : "Monthly";
 
     const chartConfig: ChartConfig = {};
     topPartNumbers.forEach((partNumber, index) => {
       chartConfig[`part${index + 1}`] = {
-        label: `${partNumber} Monthly`,
+        label: `${partNumber} ${periodLabel}`,
         color: palette[index % palette.length],
       };
       chartConfig[`part${index + 1}Cumulative`] = {
@@ -575,17 +619,11 @@ export default function Dashboard() {
       };
     });
     chartConfig.other = {
-      label: "Other Parts Monthly",
+      label: `Other Parts ${periodLabel}`,
       color: "hsl(var(--muted-foreground))",
     };
 
     const hasOther = chartData.some((row) => Number(row.other || 0) > 0);
-    const hasCumulativeLines = chartData.some((row) =>
-      topPartNumbers.some((partNumber) => {
-        const cumulativeKey = cumulativeKeyByNumber.get(partNumber);
-        return cumulativeKey ? row[cumulativeKey] !== null : false;
-      })
-    );
     const legendItems = [
       ...topPartNumbers.map((partNumber, index) => ({
         label: partNumber,
@@ -600,12 +638,12 @@ export default function Dashboard() {
       chartConfig,
       chartData,
       cumulativeKeyByNumber,
-      hasCumulativeLines,
       topPartNumbers,
       hasOther,
       legendItems,
+      periodLabel,
     };
-  }, [dashboardIncidents, partById]);
+  }, [dashboardIncidents, partById, trendGranularity]);
 
   const totalScrapCost = useMemo(() => {
     return costliestIncidents.reduce((sum, incident) => sum + incident.incidentCost, 0);
@@ -650,6 +688,7 @@ export default function Dashboard() {
         parts,
         characteristics,
         scrapIncidents,
+        chartGranularity: trendGranularity,
       });
       toast({ title: "PDF report generated" });
     } catch (error) {
@@ -827,10 +866,36 @@ export default function Dashboard() {
         </div>
 
         <div>
-          <h2 className="text-lg font-semibold mb-4">Scrap Cost by Part Over Time</h2>
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold">Scrap Cost by Part Over Time</h2>
+            <div className="inline-flex rounded-md border p-1">
+              {([
+                ["day", "Daily"],
+                ["week", "Weekly"],
+                ["month", "Monthly"],
+              ] as const).map(([value, label]) => (
+                <Button
+                  key={value}
+                  size="sm"
+                  variant={trendGranularity === value ? "default" : "ghost"}
+                  onClick={() => setTrendGranularity(value)}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
+          </div>
           <Card>
             <CardHeader>
-              <CardTitle className="text-sm font-medium">Last 12 Months with Current-Year Accumulated Trendlines</CardTitle>
+              <CardTitle className="text-sm font-medium">
+                {trendGranularity === "day"
+                  ? "Daily (Last 14 Days)"
+                  : trendGranularity === "week"
+                    ? "Weekly (Last 12 Weeks)"
+                    : "Monthly (Last 12 Months)"}
+                {" "}
+                with Current-Year Accumulated Trendlines
+              </CardTitle>
             </CardHeader>
             <CardContent>
               <ChartContainer config={scrapCostTrendChart.chartConfig} className="w-full h-[320px] aspect-auto">
@@ -874,13 +939,13 @@ export default function Dashboard() {
                     <Bar
                       key={`part${index + 1}`}
                       dataKey={`part${index + 1}`}
-                      name={`${partNumber} Monthly`}
+                      name={`${partNumber} ${scrapCostTrendChart.periodLabel}`}
+                      fill={`var(--color-part${index + 1})`}
                       yAxisId="monthly"
-                      stackId="scrap"
-                      radius={index === 0 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+                      radius={[4, 4, 0, 0]}
                     />
                   ))}
-                  {scrapCostTrendChart.hasOther ? <Bar dataKey="other" name="Other Parts Monthly" yAxisId="monthly" stackId="scrap" /> : null}
+                  {scrapCostTrendChart.hasOther ? <Bar dataKey="other" name={`Other Parts ${scrapCostTrendChart.periodLabel}`} fill="var(--color-other)" yAxisId="monthly" radius={[4, 4, 0, 0]} /> : null}
                   {scrapCostTrendChart.topPartNumbers.map((partNumber, index) => {
                     const cumulativeKey = scrapCostTrendChart.cumulativeKeyByNumber.get(partNumber);
                     if (!cumulativeKey) return null;
@@ -891,7 +956,7 @@ export default function Dashboard() {
                         dataKey={cumulativeKey}
                         name={`${partNumber} YTD Accumulated`}
                         yAxisId="cumulative"
-                        stroke={`hsl(var(--chart-${(index % 5) + 1}))`}
+                        stroke={`var(--color-part${index + 1})`}
                         strokeWidth={2.25}
                         dot={{ r: 2 }}
                         activeDot={{ r: 4 }}
@@ -911,7 +976,7 @@ export default function Dashboard() {
                 ))}
               </div>
               <p className="mt-2 text-xs text-muted-foreground">
-                Bars show monthly scrap cost. Lines show current-year accumulated scrap cost by part number. Legend is shown below the graph.
+                Bars show {trendGranularity} scrap cost by part number (side by side). Lines show current-year accumulated scrap cost on the right axis.
               </p>
             </CardContent>
           </Card>

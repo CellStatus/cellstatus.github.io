@@ -232,7 +232,9 @@ export default function CharacteristicsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   {parts.map((part) => (
-                    <SelectItem key={part.id} value={part.id}>{part.partNumber}</SelectItem>
+                    <SelectItem key={part.id} value={part.id}>
+                      {part.partName ? `${part.partNumber} - ${part.partName}` : part.partNumber}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>

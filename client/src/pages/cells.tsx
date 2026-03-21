@@ -71,6 +71,7 @@ export default function CellsPage() {
   const [location, setLocation] = useLocation();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isEditingCell, setIsEditingCell] = useState(false);
+  const [cellListOpen, setCellListOpen] = useState(true);
   const [configOpen, setConfigOpen] = useState(true);
   const [name, setName] = useState("New Cell");
   const [description, setDescription] = useState("");
@@ -96,6 +97,44 @@ export default function CellsPage() {
 
   const selectedCell = cells.find((cell) => cell.id === selectedId) || null;
   const isViewMode = selectedCell !== null && !isEditingCell;
+
+  const sortedCells = useMemo(() => {
+    const toCellNumber = (value: string | null) => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    return [...cells].sort((left, right) => {
+      const leftNumber = toCellNumber(left.status);
+      const rightNumber = toCellNumber(right.status);
+
+      if (leftNumber !== null && rightNumber !== null) {
+        if (leftNumber !== rightNumber) {
+          return leftNumber - rightNumber;
+        }
+
+        return (left.name || "").localeCompare(right.name || "", undefined, {
+          sensitivity: "base",
+        });
+      }
+
+      if (leftNumber !== null) return -1;
+      if (rightNumber !== null) return 1;
+
+      const statusCompare = (left.status || "").localeCompare(right.status || "", undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
+
+      if (statusCompare !== 0) {
+        return statusCompare;
+      }
+
+      return (left.name || "").localeCompare(right.name || "", undefined, {
+        sensitivity: "base",
+      });
+    });
+  }, [cells]);
 
   useEffect(() => {
     const queryIndex = location.indexOf("?");
@@ -337,9 +376,16 @@ export default function CellsPage() {
     <div className="p-6 h-full overflow-auto space-y-4">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card>
-          <CardHeader>
-            <CardTitle>Cells</CardTitle>
+          <CardHeader
+            className="cursor-pointer"
+            onClick={() => setCellListOpen((open) => !open)}
+          >
+            <div className="flex items-center justify-between">
+              <CardTitle>Cells</CardTitle>
+              {cellListOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            </div>
           </CardHeader>
+          {cellListOpen && (
           <CardContent className="space-y-2">
             <Button
               variant="outline"
@@ -357,7 +403,7 @@ export default function CellsPage() {
               <Plus className="h-4 w-4 mr-2" />
               New Cell
             </Button>
-            {cells.map((cell) => (
+            {sortedCells.map((cell) => (
               <button
                 key={cell.id}
                 className={`w-full text-left border rounded p-2 ${selectedId === cell.id ? "border-primary" : "border-border"}`}
@@ -368,6 +414,7 @@ export default function CellsPage() {
               </button>
             ))}
           </CardContent>
+          )}
         </Card>
 
         <div className="lg:col-span-2 space-y-4">

@@ -14,6 +14,7 @@ type DashboardReportData = {
   parts: Part[];
   characteristics: Characteristic[];
   scrapIncidents: ScrapIncident[];
+  chartGranularity?: "day" | "week" | "month";
 };
 
 const formatCurrency = (value: number) =>
@@ -32,9 +33,9 @@ type TimeRangeMetrics = {
 
 type TrendPoint = {
   period: string;
-  monthlyValues: Record<string, number>;
+  periodValues: Record<string, number>;
   cumulativeValues: Record<string, number | null>;
-  totalMonthly: number;
+  maxPeriodValue: number;
 };
 
 const parseIncidentDate = (incident: ScrapIncident) => {
@@ -94,40 +95,85 @@ const getTimeRangeMetrics = (scrapIncidents: ScrapIncident[]) => {
   return metrics;
 };
 
-const getMonthlyPartTrend = (
+const getPartTrendByGranularity = (
   scrapIncidents: ScrapIncident[],
   partById: Map<string, Part>,
+  granularity: "day" | "week" | "month",
 ) => {
   const now = new Date();
   const currentYear = now.getFullYear();
-  const months = Array.from({ length: 12 }, (_, index) => {
-    const date = new Date(now.getFullYear(), now.getMonth() - (11 - index), 1);
-    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-    const label = date.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
-    return { key, label, year: date.getFullYear() };
+
+  const startOfDay = (date: Date) =>
+    new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const startOfWeek = (date: Date) => {
+    const day = (date.getDay() + 6) % 7;
+    const monday = new Date(date);
+    monday.setDate(date.getDate() - day);
+    return startOfDay(monday);
+  };
+  const startOfMonth = (date: Date) =>
+    new Date(date.getFullYear(), date.getMonth(), 1);
+  const getPeriodStart = (date: Date) => {
+    if (granularity === "day") return startOfDay(date);
+    if (granularity === "week") return startOfWeek(date);
+    return startOfMonth(date);
+  };
+  const toIsoDate = (date: Date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  };
+  const formatPeriodLabel = (date: Date) => {
+    if (granularity === "day") {
+      return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    }
+    if (granularity === "week") {
+      return `Wk ${date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+    }
+    return date.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
+  };
+
+  const bucketCount = granularity === "day" ? 14 : 12;
+  const periods = Array.from({ length: bucketCount }, (_, index) => {
+    const stepsBack = bucketCount - 1 - index;
+    const anchor = new Date(now);
+    if (granularity === "day") {
+      anchor.setDate(anchor.getDate() - stepsBack);
+    } else if (granularity === "week") {
+      anchor.setDate(anchor.getDate() - stepsBack * 7);
+    } else {
+      anchor.setMonth(anchor.getMonth() - stepsBack, 1);
+    }
+    const start = getPeriodStart(anchor);
+    return {
+      key: toIsoDate(start),
+      label: formatPeriodLabel(start),
+      year: start.getFullYear(),
+    };
   });
 
-  const monthSet = new Set(months.map((month) => month.key));
-  const monthPartTotals = new Map<string, Map<string, number>>();
+  const periodSet = new Set(periods.map((period) => period.key));
+  const periodPartTotals = new Map<string, Map<string, number>>();
   const partTotals = new Map<string, number>();
 
   scrapIncidents.forEach((incident) => {
     const incidentDate = parseIncidentDate(incident);
     if (!incidentDate) return;
 
-    const monthKey = `${incidentDate.getFullYear()}-${String(incidentDate.getMonth() + 1).padStart(2, "0")}`;
-    if (!monthSet.has(monthKey)) return;
+    const periodKey = toIsoDate(getPeriodStart(incidentDate));
+    if (!periodSet.has(periodKey)) return;
 
     const partNumber = incident.partId ? (partById.get(incident.partId)?.partNumber || "Unknown Part") : "Unassigned";
     const incidentCost = Number(incident.estimatedCost || 0);
 
     partTotals.set(partNumber, (partTotals.get(partNumber) || 0) + incidentCost);
 
-    if (!monthPartTotals.has(monthKey)) {
-      monthPartTotals.set(monthKey, new Map());
+    if (!periodPartTotals.has(periodKey)) {
+      periodPartTotals.set(periodKey, new Map());
     }
 
-    const partCostMap = monthPartTotals.get(monthKey)!;
+    const partCostMap = periodPartTotals.get(periodKey)!;
     partCostMap.set(partNumber, (partCostMap.get(partNumber) || 0) + incidentCost);
   });
 
@@ -139,42 +185,42 @@ const getMonthlyPartTrend = (
   const categoryKeys = [...topPartNumbers, "Other Parts"];
   const cumulativeRunningTotals = new Map<string, number>();
 
-  const points: TrendPoint[] = months.map((month) => {
-    const monthlyValues: Record<string, number> = {};
+  const points: TrendPoint[] = periods.map((period) => {
+    const periodValues: Record<string, number> = {};
     const cumulativeValues: Record<string, number | null> = {};
     categoryKeys.forEach((key) => {
-      monthlyValues[key] = 0;
+      periodValues[key] = 0;
     });
     topPartNumbers.forEach((partNumber) => {
       cumulativeValues[partNumber] = null;
     });
 
-    const partCostMap = monthPartTotals.get(month.key);
+    const partCostMap = periodPartTotals.get(period.key);
     if (partCostMap) {
       partCostMap.forEach((cost, partNumber) => {
         if (topPartNumbers.includes(partNumber)) {
-          monthlyValues[partNumber] = cost;
+          periodValues[partNumber] = cost;
         } else {
-          monthlyValues["Other Parts"] += cost;
+          periodValues["Other Parts"] += cost;
         }
       });
     }
 
     topPartNumbers.forEach((partNumber) => {
-      if (month.year === currentYear) {
-        const nextValue = (cumulativeRunningTotals.get(partNumber) || 0) + Number(monthlyValues[partNumber] || 0);
+      if (period.year === currentYear) {
+        const nextValue = (cumulativeRunningTotals.get(partNumber) || 0) + Number(periodValues[partNumber] || 0);
         cumulativeRunningTotals.set(partNumber, nextValue);
         cumulativeValues[partNumber] = nextValue;
       }
     });
 
-    const totalMonthly = categoryKeys.reduce((sum, key) => sum + Number(monthlyValues[key] || 0), 0);
+    const maxPeriodValue = categoryKeys.reduce((max, key) => Math.max(max, Number(periodValues[key] || 0)), 0);
 
     return {
-      period: month.label,
-      monthlyValues,
+      period: period.label,
+      periodValues,
       cumulativeValues,
-      totalMonthly,
+      maxPeriodValue,
     };
   });
 
@@ -205,7 +251,7 @@ const drawStackedBarChart = (
   const plotWidth = Math.max(axisRight - axisLeft, 1);
   const plotHeight = Math.max(axisBottom - axisTop, 1);
 
-  const maxMonthlyTotal = Math.max(1, ...points.map((point) => point.totalMonthly));
+  const maxPeriodValue = Math.max(1, ...points.map((point) => point.maxPeriodValue));
   const maxCumulativeTotal = Math.max(
     1,
     ...points.flatMap((point) =>
@@ -220,7 +266,7 @@ const drawStackedBarChart = (
     const yPos = axisBottom - ratio * plotHeight;
     doc.line(axisLeft, yPos, axisRight, yPos);
 
-    const monthlyTickValue = maxMonthlyTotal * ratio;
+    const monthlyTickValue = maxPeriodValue * ratio;
     const cumulativeTickValue = maxCumulativeTotal * ratio;
     doc.setTextColor(100, 116, 139);
     doc.setFont("helvetica", "normal");
@@ -249,26 +295,30 @@ const drawStackedBarChart = (
   });
 
   const slotWidth = plotWidth / Math.max(points.length, 1);
-  const barWidth = Math.max(Math.min(slotWidth * 0.72, 26), 10);
+  const groupedWidth = Math.max(slotWidth * 0.8, 1);
+  const groupGap = 2;
+  const barWidth = Math.max(
+    2,
+    Math.min(16, (groupedWidth - groupGap * (categories.length - 1)) / Math.max(categories.length, 1)),
+  );
 
   points.forEach((point, pointIndex) => {
-    const barX = axisLeft + slotWidth * pointIndex + (slotWidth - barWidth) / 2;
-    let stackedY = axisBottom;
+    const groupStartX = axisLeft + slotWidth * pointIndex + (slotWidth - groupedWidth) / 2;
 
-    categories.forEach((category) => {
-      const value = Number(point.monthlyValues[category] || 0);
+    categories.forEach((category, categoryIndex) => {
+      const value = Number(point.periodValues[category] || 0);
       if (value <= 0) return;
-      const segmentHeight = (value / maxMonthlyTotal) * plotHeight;
+      const segmentHeight = (value / maxPeriodValue) * plotHeight;
       const color = categoryColorByName.get(category) || [100, 116, 139];
       doc.setFillColor(color[0], color[1], color[2]);
-      doc.rect(barX, stackedY - segmentHeight, barWidth, segmentHeight, "F");
-      stackedY -= segmentHeight;
+      const barX = groupStartX + categoryIndex * (barWidth + groupGap);
+      doc.rect(barX, axisBottom - segmentHeight, barWidth, segmentHeight, "F");
     });
 
     doc.setTextColor(71, 85, 105);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
-    doc.text(point.period, barX + barWidth / 2, axisBottom + 12, { align: "center" });
+    doc.text(point.period, groupStartX + groupedWidth / 2, axisBottom + 12, { align: "center" });
   });
 
   lineCategories.forEach((category) => {
@@ -329,7 +379,7 @@ const drawStackedBarChart = (
 
   doc.setTextColor(100, 116, 139);
   doc.setFontSize(8);
-  doc.text("Bars = monthly scrap cost, lines = current-year accumulated scrap cost. Legend shown below the graph.", axisLeft, axisBottom + 54);
+  doc.text("Bars = selected-period scrap cost (grouped side by side), lines = current-year accumulated scrap cost. Legend shown below the graph.", axisLeft, axisBottom + 54);
 };
 
 const getMachineStatusCounts = (machines: Machine[]) => {
@@ -395,7 +445,14 @@ const getCellBottleneckSummary = (cell: CellConfiguration, machineById: Map<stri
 };
 
 export function exportDashboardStatusPdf(data: DashboardReportData) {
-  const { machines, cells, parts, characteristics, scrapIncidents } = data;
+  const {
+    machines,
+    cells,
+    parts,
+    characteristics,
+    scrapIncidents,
+    chartGranularity = "day",
+  } = data;
   const generatedAt = new Date();
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -405,7 +462,7 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
   const partById = new Map(parts.map((part) => [part.id, part]));
   const machineById = new Map(machines.map((machine) => [machine.id, machine]));
   const timeRangeMetrics = getTimeRangeMetrics(scrapIncidents);
-  const monthlyPartTrend = getMonthlyPartTrend(scrapIncidents, partById);
+  const trend = getPartTrendByGranularity(scrapIncidents, partById, chartGranularity);
   const statusCounts = getMachineStatusCounts(machines);
   const openIncidents = scrapIncidents.filter((incident) => incident.status !== "closed");
   const totalIncidentCost = scrapIncidents.reduce((sum, incident) => sum + Number(incident.estimatedCost || 0), 0);
@@ -536,8 +593,17 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
   doc.setFontSize(16);
   doc.text("Scrap Trend Metrics", marginX, 40);
 
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(71, 85, 105);
+  doc.text(
+    `Trend granularity: ${chartGranularity === "day" ? "Daily" : chartGranularity === "week" ? "Weekly" : "Monthly"}`,
+    marginX,
+    52,
+  );
+
   autoTable(doc, {
-    startY: 56,
+    startY: 62,
     theme: "grid",
     styles: { fontSize: 9, cellPadding: 6, overflow: "linebreak" },
     headStyles: { fillColor: [30, 41, 59], textColor: 255 },
@@ -554,16 +620,20 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
   doc.setTextColor(15, 23, 42);
-  doc.text("Stacked Scrap Cost by Part Over Time (Last 12 Months)", marginX, 156);
+  doc.text(
+    `${chartGranularity === "day" ? "Daily (Last 14 Days)" : chartGranularity === "week" ? "Weekly (Last 12 Weeks)" : "Monthly (Last 12 Months)"} Scrap Cost by Part with Current-Year Accumulated Trendlines`,
+    marginX,
+    166,
+  );
 
   drawStackedBarChart(doc, {
     x: marginX,
-    y: 168,
+    y: 176,
     width: pageWidth - marginX * 2,
-    height: 340,
-    points: monthlyPartTrend.points,
-    categories: monthlyPartTrend.categories,
-    lineCategories: monthlyPartTrend.lineCategories,
+    height: 332,
+    points: trend.points,
+    categories: trend.categories,
+    lineCategories: trend.lineCategories,
   });
 
   doc.addPage();
