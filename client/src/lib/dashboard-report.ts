@@ -24,6 +24,314 @@ const safeText = (value: string | number | null | undefined) => {
   return String(value);
 };
 
+type TimeRangeMetrics = {
+  incidentCount: number;
+  totalCost: number;
+  totalQuantity: number;
+};
+
+type TrendPoint = {
+  period: string;
+  monthlyValues: Record<string, number>;
+  cumulativeValues: Record<string, number | null>;
+  totalMonthly: number;
+};
+
+const parseIncidentDate = (incident: ScrapIncident) => {
+  const rawDate = incident.dateCreated || incident.createdAt || incident.updatedAt;
+  if (!rawDate) return null;
+  const parsed = new Date(rawDate);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const getTimeRangeMetrics = (scrapIncidents: ScrapIncident[]) => {
+  const now = new Date();
+
+  const startOfWeek = new Date(now);
+  const dayOffset = (startOfWeek.getDay() + 6) % 7;
+  startOfWeek.setDate(startOfWeek.getDate() - dayOffset);
+  startOfWeek.setHours(0, 0, 0, 0);
+
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startOfYear = new Date(now.getFullYear(), 0, 1);
+
+  const metrics: {
+    week: TimeRangeMetrics;
+    month: TimeRangeMetrics;
+    year: TimeRangeMetrics;
+  } = {
+    week: { incidentCount: 0, totalCost: 0, totalQuantity: 0 },
+    month: { incidentCount: 0, totalCost: 0, totalQuantity: 0 },
+    year: { incidentCount: 0, totalCost: 0, totalQuantity: 0 },
+  };
+
+  scrapIncidents.forEach((incident) => {
+    const incidentDate = parseIncidentDate(incident);
+    if (!incidentDate) return;
+
+    const incidentCost = Number(incident.estimatedCost || 0);
+    const quantity = Number(incident.quantity || 0);
+
+    if (incidentDate >= startOfYear) {
+      metrics.year.incidentCount += 1;
+      metrics.year.totalCost += incidentCost;
+      metrics.year.totalQuantity += quantity;
+    }
+
+    if (incidentDate >= startOfMonth) {
+      metrics.month.incidentCount += 1;
+      metrics.month.totalCost += incidentCost;
+      metrics.month.totalQuantity += quantity;
+    }
+
+    if (incidentDate >= startOfWeek) {
+      metrics.week.incidentCount += 1;
+      metrics.week.totalCost += incidentCost;
+      metrics.week.totalQuantity += quantity;
+    }
+  });
+
+  return metrics;
+};
+
+const getMonthlyPartTrend = (
+  scrapIncidents: ScrapIncident[],
+  partById: Map<string, Part>,
+) => {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const months = Array.from({ length: 12 }, (_, index) => {
+    const date = new Date(now.getFullYear(), now.getMonth() - (11 - index), 1);
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    const label = date.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
+    return { key, label, year: date.getFullYear() };
+  });
+
+  const monthSet = new Set(months.map((month) => month.key));
+  const monthPartTotals = new Map<string, Map<string, number>>();
+  const partTotals = new Map<string, number>();
+
+  scrapIncidents.forEach((incident) => {
+    const incidentDate = parseIncidentDate(incident);
+    if (!incidentDate) return;
+
+    const monthKey = `${incidentDate.getFullYear()}-${String(incidentDate.getMonth() + 1).padStart(2, "0")}`;
+    if (!monthSet.has(monthKey)) return;
+
+    const partNumber = incident.partId ? (partById.get(incident.partId)?.partNumber || "Unknown Part") : "Unassigned";
+    const incidentCost = Number(incident.estimatedCost || 0);
+
+    partTotals.set(partNumber, (partTotals.get(partNumber) || 0) + incidentCost);
+
+    if (!monthPartTotals.has(monthKey)) {
+      monthPartTotals.set(monthKey, new Map());
+    }
+
+    const partCostMap = monthPartTotals.get(monthKey)!;
+    partCostMap.set(partNumber, (partCostMap.get(partNumber) || 0) + incidentCost);
+  });
+
+  const topPartNumbers = Array.from(partTotals.entries())
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 5)
+    .map(([partNumber]) => partNumber);
+
+  const categoryKeys = [...topPartNumbers, "Other Parts"];
+  const cumulativeRunningTotals = new Map<string, number>();
+
+  const points: TrendPoint[] = months.map((month) => {
+    const monthlyValues: Record<string, number> = {};
+    const cumulativeValues: Record<string, number | null> = {};
+    categoryKeys.forEach((key) => {
+      monthlyValues[key] = 0;
+    });
+    topPartNumbers.forEach((partNumber) => {
+      cumulativeValues[partNumber] = null;
+    });
+
+    const partCostMap = monthPartTotals.get(month.key);
+    if (partCostMap) {
+      partCostMap.forEach((cost, partNumber) => {
+        if (topPartNumbers.includes(partNumber)) {
+          monthlyValues[partNumber] = cost;
+        } else {
+          monthlyValues["Other Parts"] += cost;
+        }
+      });
+    }
+
+    topPartNumbers.forEach((partNumber) => {
+      if (month.year === currentYear) {
+        const nextValue = (cumulativeRunningTotals.get(partNumber) || 0) + Number(monthlyValues[partNumber] || 0);
+        cumulativeRunningTotals.set(partNumber, nextValue);
+        cumulativeValues[partNumber] = nextValue;
+      }
+    });
+
+    const totalMonthly = categoryKeys.reduce((sum, key) => sum + Number(monthlyValues[key] || 0), 0);
+
+    return {
+      period: month.label,
+      monthlyValues,
+      cumulativeValues,
+      totalMonthly,
+    };
+  });
+
+  return {
+    points,
+    categories: categoryKeys,
+    lineCategories: topPartNumbers,
+  };
+};
+
+const drawStackedBarChart = (
+  doc: jsPDF,
+  options: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    points: TrendPoint[];
+    categories: string[];
+    lineCategories: string[];
+  },
+) => {
+  const { x, y, width, height, points, categories, lineCategories } = options;
+  const axisLeft = x + 46;
+  const axisRight = x + width - 44;
+  const axisTop = y + 14;
+  const axisBottom = y + height - 78;
+  const plotWidth = Math.max(axisRight - axisLeft, 1);
+  const plotHeight = Math.max(axisBottom - axisTop, 1);
+
+  const maxMonthlyTotal = Math.max(1, ...points.map((point) => point.totalMonthly));
+  const maxCumulativeTotal = Math.max(
+    1,
+    ...points.flatMap((point) =>
+      lineCategories.map((category) => Number(point.cumulativeValues[category] || 0))
+    ),
+  );
+  const tickCount = 4;
+
+  doc.setDrawColor(226, 232, 240);
+  for (let tick = 0; tick <= tickCount; tick += 1) {
+    const ratio = tick / tickCount;
+    const yPos = axisBottom - ratio * plotHeight;
+    doc.line(axisLeft, yPos, axisRight, yPos);
+
+    const monthlyTickValue = maxMonthlyTotal * ratio;
+    const cumulativeTickValue = maxCumulativeTotal * ratio;
+    doc.setTextColor(100, 116, 139);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.text(formatCurrency(monthlyTickValue), axisLeft - 6, yPos + 3, { align: "right" });
+    doc.text(formatCurrency(cumulativeTickValue), axisRight + 6, yPos + 3, { align: "left" });
+  }
+
+  doc.setDrawColor(148, 163, 184);
+  doc.line(axisLeft, axisTop, axisLeft, axisBottom);
+  doc.line(axisLeft, axisBottom, axisRight, axisBottom);
+  doc.line(axisRight, axisTop, axisRight, axisBottom);
+
+  const palette: Array<[number, number, number]> = [
+    [190, 24, 93],
+    [14, 116, 144],
+    [22, 163, 74],
+    [124, 58, 237],
+    [202, 138, 4],
+    [100, 116, 139],
+  ];
+
+  const categoryColorByName = new Map<string, [number, number, number]>();
+  categories.forEach((category, index) => {
+    categoryColorByName.set(category, palette[index % palette.length]);
+  });
+
+  const slotWidth = plotWidth / Math.max(points.length, 1);
+  const barWidth = Math.max(Math.min(slotWidth * 0.72, 26), 10);
+
+  points.forEach((point, pointIndex) => {
+    const barX = axisLeft + slotWidth * pointIndex + (slotWidth - barWidth) / 2;
+    let stackedY = axisBottom;
+
+    categories.forEach((category) => {
+      const value = Number(point.monthlyValues[category] || 0);
+      if (value <= 0) return;
+      const segmentHeight = (value / maxMonthlyTotal) * plotHeight;
+      const color = categoryColorByName.get(category) || [100, 116, 139];
+      doc.setFillColor(color[0], color[1], color[2]);
+      doc.rect(barX, stackedY - segmentHeight, barWidth, segmentHeight, "F");
+      stackedY -= segmentHeight;
+    });
+
+    doc.setTextColor(71, 85, 105);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.text(point.period, barX + barWidth / 2, axisBottom + 12, { align: "center" });
+  });
+
+  lineCategories.forEach((category) => {
+    const color = categoryColorByName.get(category) || [100, 116, 139];
+    const linePoints = points
+      .map((point, pointIndex) => {
+        const value = point.cumulativeValues[category];
+        if (value === null || value === undefined || value <= 0) return null;
+        const xPos = axisLeft + slotWidth * pointIndex + slotWidth / 2;
+        const yPos = axisBottom - (Number(value) / maxCumulativeTotal) * plotHeight;
+        return { x: xPos, y: yPos };
+      });
+
+    doc.setDrawColor(color[0], color[1], color[2]);
+    doc.setLineWidth(1.75);
+
+    let previousPoint: { x: number; y: number } | null = null;
+    linePoints.forEach((point) => {
+      if (!point) {
+        previousPoint = null;
+        return;
+      }
+
+      if (previousPoint) {
+        doc.line(previousPoint.x, previousPoint.y, point.x, point.y);
+      }
+
+      doc.setFillColor(color[0], color[1], color[2]);
+      doc.circle(point.x, point.y, 2.4, "F");
+      previousPoint = point;
+    });
+  });
+
+  const legendStartY = axisBottom + 24;
+  let legendX = axisLeft;
+  let legendY = legendStartY;
+
+  categories.forEach((category) => {
+    const color = categoryColorByName.get(category) || [100, 116, 139];
+
+    if (legendX > axisRight - 140) {
+      legendX = axisLeft;
+      legendY += 14;
+    }
+
+    doc.setFillColor(color[0], color[1], color[2]);
+    doc.rect(legendX, legendY - 7, 10, 10, "F");
+    doc.setDrawColor(color[0], color[1], color[2]);
+    doc.setLineWidth(1.5);
+    doc.line(legendX + 14, legendY - 2, legendX + 28, legendY - 2);
+    doc.setFillColor(color[0], color[1], color[2]);
+    doc.circle(legendX + 21, legendY - 2, 1.6, "F");
+    doc.setTextColor(51, 65, 85);
+    doc.setFontSize(8);
+    doc.text(category, legendX + 32, legendY + 1);
+    legendX += 32 + Math.min(doc.getTextWidth(category), 120) + 18;
+  });
+
+  doc.setTextColor(100, 116, 139);
+  doc.setFontSize(8);
+  doc.text("Bars = monthly scrap cost, lines = current-year accumulated scrap cost. Legend shown below the graph.", axisLeft, axisBottom + 54);
+};
+
 const getMachineStatusCounts = (machines: Machine[]) => {
   const counts = {
     running: 0,
@@ -82,7 +390,8 @@ const getCellBottleneckSummary = (cell: CellConfiguration, machineById: Map<stri
   });
 
   if (bottleneckCycleTime === null) return "-";
-  return `${bottleneckName} (${bottleneckCycleTime.toFixed(1)}s)`;
+  const cycleTimeSec = Number(bottleneckCycleTime);
+  return `${bottleneckName} (${cycleTimeSec.toFixed(1)}s)`;
 };
 
 export function exportDashboardStatusPdf(data: DashboardReportData) {
@@ -95,13 +404,16 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
 
   const partById = new Map(parts.map((part) => [part.id, part]));
   const machineById = new Map(machines.map((machine) => [machine.id, machine]));
+  const timeRangeMetrics = getTimeRangeMetrics(scrapIncidents);
+  const monthlyPartTrend = getMonthlyPartTrend(scrapIncidents, partById);
   const statusCounts = getMachineStatusCounts(machines);
   const openIncidents = scrapIncidents.filter((incident) => incident.status !== "closed");
   const totalIncidentCost = scrapIncidents.reduce((sum, incident) => sum + Number(incident.estimatedCost || 0), 0);
   const openIncidentCost = openIncidents.reduce((sum, incident) => sum + Number(incident.estimatedCost || 0), 0);
   const machinesWithCycleTime = machines.filter((machine) => (machine.idealCycleTime || 0) > 0).length;
 
-  const topOpenIncidents = [...openIncidents]
+  const topIncidents = [...scrapIncidents]
+    .filter((incident) => Number(incident.estimatedCost || 0) > 0)
     .sort((left, right) => Number(right.estimatedCost || 0) - Number(left.estimatedCost || 0))
     .slice(0, 10);
 
@@ -202,8 +514,8 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
     margin: { left: 330, right: marginX },
     tableWidth: "auto",
     head: [["Rank", "Machine", "Part", "Characteristic", "Qty", "Cost"]],
-    body: topOpenIncidents.length > 0
-      ? topOpenIncidents.map((incident, index) => {
+    body: topIncidents.length > 0
+      ? topIncidents.map((incident, index) => {
           const machine = machineById.get(incident.machineId);
           const part = incident.partId ? partById.get(incident.partId) : undefined;
           return [
@@ -215,7 +527,43 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
             formatCurrency(Number(incident.estimatedCost || 0)),
           ];
         })
-      : [["-", "-", "-", "No open incidents", "-", "-"]],
+      : [["-", "-", "-", "No incidents", "-", "-"]],
+  });
+
+  doc.addPage();
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(15, 23, 42);
+  doc.setFontSize(16);
+  doc.text("Scrap Trend Metrics", marginX, 40);
+
+  autoTable(doc, {
+    startY: 56,
+    theme: "grid",
+    styles: { fontSize: 9, cellPadding: 6, overflow: "linebreak" },
+    headStyles: { fillColor: [30, 41, 59], textColor: 255 },
+    margin: { left: marginX, right: marginX },
+    tableWidth: 420,
+    head: [["Period", "Incidents", "Scrap Qty", "Scrap Cost"]],
+    body: [
+      ["This Week", safeText(timeRangeMetrics.week.incidentCount), safeText(timeRangeMetrics.week.totalQuantity), formatCurrency(timeRangeMetrics.week.totalCost)],
+      ["This Month", safeText(timeRangeMetrics.month.incidentCount), safeText(timeRangeMetrics.month.totalQuantity), formatCurrency(timeRangeMetrics.month.totalCost)],
+      ["This Year", safeText(timeRangeMetrics.year.incidentCount), safeText(timeRangeMetrics.year.totalQuantity), formatCurrency(timeRangeMetrics.year.totalCost)],
+    ],
+  });
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(15, 23, 42);
+  doc.text("Stacked Scrap Cost by Part Over Time (Last 12 Months)", marginX, 156);
+
+  drawStackedBarChart(doc, {
+    x: marginX,
+    y: 168,
+    width: pageWidth - marginX * 2,
+    height: 340,
+    points: monthlyPartTrend.points,
+    categories: monthlyPartTrend.categories,
+    lineCategories: monthlyPartTrend.lineCategories,
   });
 
   doc.addPage();

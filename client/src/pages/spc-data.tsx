@@ -41,6 +41,7 @@ export default function SpcData() {
   const [search, setSearch] = useState("");
   const [filterMachineId, setFilterMachineId] = useState<string | null>(null);
   const [filterCellName, setFilterCellName] = useState<string | null>(null);
+  const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<IncidentForm>(emptyForm);
   const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set());
@@ -151,6 +152,7 @@ export default function SpcData() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/scrap-incidents"] });
       setForm(emptyForm);
+      setSelectedIncidentId(null);
       toast({ title: "Scrap incident created" });
     },
     onError: () => {
@@ -173,7 +175,7 @@ export default function SpcData() {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/scrap-incidents"] });
-      setForm(emptyForm);
+      setSelectedIncidentId(editingId);
       setEditingId(null);
       toast({ title: "Scrap incident updated" });
     },
@@ -220,9 +222,7 @@ export default function SpcData() {
     await createMutation.mutateAsync(form);
   };
 
-  const startEdit = (incident: ScrapIncident) => {
-    setEditingId(incident.id);
-    setFormOpen(true);
+  const loadIncidentIntoForm = (incident: ScrapIncident) => {
     setForm({
       machineId: incident.machineId,
       partId: incident.partId,
@@ -235,6 +235,22 @@ export default function SpcData() {
       dateClosed: incident.dateClosed || "",
     });
   };
+
+  const openIncident = (incident: ScrapIncident) => {
+    setSelectedIncidentId(incident.id);
+    setEditingId(null);
+    setFormOpen(true);
+    loadIncidentIntoForm(incident);
+  };
+
+  const startEdit = (incident: ScrapIncident) => {
+    setSelectedIncidentId(incident.id);
+    setEditingId(incident.id);
+    setFormOpen(true);
+    loadIncidentIntoForm(incident);
+  };
+
+  const isViewMode = selectedIncidentId !== null && editingId === null;
 
   const toggleNote = (id: string) => {
     setExpandedNotes((prev) => {
@@ -287,166 +303,235 @@ export default function SpcData() {
         <CardHeader
           className="cursor-pointer select-none"
           onClick={() => {
-            if (!editingId) setFormOpen((o) => !o);
+            if (!editingId && !selectedIncidentId) setFormOpen((o) => !o);
           }}
         >
           <div className="flex items-center justify-between">
-            <CardTitle>{editingId ? "Edit Scrap Incident" : "New Scrap Incident"}</CardTitle>
-            {!editingId && (formOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />)}
+            <CardTitle>{editingId ? "Edit Scrap Incident" : selectedIncidentId ? "View Scrap Incident" : "New Scrap Incident"}</CardTitle>
+            {!editingId && !selectedIncidentId && (formOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />)}
           </div>
         </CardHeader>
-        {(formOpen || editingId) && (
+        {(formOpen || selectedIncidentId || editingId) && (
         <CardContent className="space-y-3">
-          <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
-            <Select value={form.machineId} onValueChange={(value) => setForm((prev) => ({ ...prev, machineId: value }))}>
-              <SelectTrigger>
-                <SelectValue placeholder="Machine *" />
-              </SelectTrigger>
-              <SelectContent>
-                {machines.map((machine) => (
-                  <SelectItem key={machine.id} value={machine.id}>
-                    {machine.name} ({machine.machineId})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              value={form.partId ?? undefined}
-              onValueChange={(value) => {
-                setForm((prev) => {
-                  const nextPartId = value;
-                  const nextCharacteristic = prev.characteristic
-                    && characteristicByLabel.get(prev.characteristic)?.partId === nextPartId
-                    ? prev.characteristic
-                    : "";
-                  return {
-                    ...prev,
-                    partId: nextPartId,
-                    characteristic: nextCharacteristic,
-                  };
-                });
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Part Number *" />
-              </SelectTrigger>
-              <SelectContent>
-                {parts.map((part) => (
-                  <SelectItem key={part.id} value={part.id}>
-                    {part.partName ? `${part.partNumber} - ${part.partName}` : part.partNumber}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              value={form.characteristic}
-              onValueChange={(value) => {
-                setForm((prev) => ({
-                  ...prev,
-                  characteristic: value,
-                }));
-              }}
-              disabled={!form.partId}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Characteristic *" />
-              </SelectTrigger>
-              <SelectContent>
-                {filteredCharacteristics.map((char) => (
-                  <SelectItem key={char.id} value={characteristicLabel(char)}>
-                    {characteristicLabel(char)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Input
-              type="number"
-              min={1}
-              placeholder="Quantity *"
-              value={form.quantity}
-              onChange={(e) => setForm((prev) => ({ ...prev, quantity: e.target.value }))}
-            />
-            <div className="flex gap-1 items-center">
-              <Input
-                type="number"
-                min={0}
-                step="0.01"
-                placeholder="Estimated Cost *"
-                value={form.estimatedCost}
-                onChange={(e) => setForm((prev) => ({ ...prev, estimatedCost: e.target.value }))}
-              />
-              {(() => {
-                const canCalc = selectedPart?.rawMaterialCost != null;
-                return canCalc ? (
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="outline"
-                    title={`Calculate: $${selectedPart!.rawMaterialCost} × qty`}
-                    onClick={() => {
-                      const qty = Number(form.quantity) || 1;
-                      setForm((prev) => ({
+          {isViewMode ? (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <div className="text-xs text-muted-foreground">Machine</div>
+                  <div className="text-sm font-medium">{machineById.get(form.machineId)?.name || machineById.get(form.machineId)?.machineId || "-"}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Part Number</div>
+                  <div className="text-sm font-medium">{form.partId ? (partById.get(form.partId)?.partName ? `${partById.get(form.partId)?.partNumber} - ${partById.get(form.partId)?.partName}` : (partById.get(form.partId)?.partNumber || "-")) : "-"}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Characteristic</div>
+                  <div className="text-sm font-medium">{form.characteristic || "-"}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Quantity</div>
+                  <div className="text-sm font-medium">{form.quantity || "-"}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Estimated Cost</div>
+                  <div className="text-sm font-medium">{form.estimatedCost ? `$${Number(form.estimatedCost).toLocaleString()}` : "-"}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Status</div>
+                  <div className="text-sm font-medium capitalize">{form.status}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Date Created</div>
+                  <div className="text-sm font-medium">{form.dateCreated || "-"}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Date Closed</div>
+                  <div className="text-sm font-medium">{form.dateClosed || "-"}</div>
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">Note</div>
+                <div className="text-sm whitespace-pre-wrap">{form.note || "-"}</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    const incident = rows.find((row) => row.id === selectedIncidentId);
+                    if (!incident) return;
+                    startEdit(incident);
+                  }}
+                >
+                  Edit
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setEditingId(null);
+                    setSelectedIncidentId(null);
+                    setFormOpen(false);
+                    setForm(emptyForm);
+                  }}
+                >
+                  Close
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+                <Select value={form.machineId} onValueChange={(value) => setForm((prev) => ({ ...prev, machineId: value }))}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Machine *" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {machines.map((machine) => (
+                      <SelectItem key={machine.id} value={machine.id}>
+                        {machine.name} ({machine.machineId})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={form.partId ?? undefined}
+                  onValueChange={(value) => {
+                    setForm((prev) => {
+                      const nextPartId = value;
+                      const nextCharacteristic = prev.characteristic
+                        && characteristicByLabel.get(prev.characteristic)?.partId === nextPartId
+                        ? prev.characteristic
+                        : "";
+                      return {
                         ...prev,
-                        estimatedCost: String((selectedPart!.rawMaterialCost! * qty).toFixed(2)),
-                      }));
+                        partId: nextPartId,
+                        characteristic: nextCharacteristic,
+                      };
+                    });
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Part Number *" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {parts.map((part) => (
+                      <SelectItem key={part.id} value={part.id}>
+                        {part.partName ? `${part.partNumber} - ${part.partName}` : part.partNumber}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={form.characteristic}
+                  onValueChange={(value) => {
+                    setForm((prev) => ({
+                      ...prev,
+                      characteristic: value,
+                    }));
+                  }}
+                  disabled={!form.partId}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Characteristic *" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {filteredCharacteristics.map((char) => (
+                      <SelectItem key={char.id} value={characteristicLabel(char)}>
+                        {characteristicLabel(char)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input
+                  type="number"
+                  min={1}
+                  placeholder="Quantity *"
+                  value={form.quantity}
+                  onChange={(e) => setForm((prev) => ({ ...prev, quantity: e.target.value }))}
+                />
+                <div className="flex gap-1 items-center">
+                  <Input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    placeholder="Estimated Cost *"
+                    value={form.estimatedCost}
+                    onChange={(e) => setForm((prev) => ({ ...prev, estimatedCost: e.target.value }))}
+                  />
+                  {(() => {
+                    const canCalc = selectedPart?.rawMaterialCost != null;
+                    return canCalc ? (
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="outline"
+                        title={`Calculate: $${selectedPart!.rawMaterialCost} × qty`}
+                        onClick={() => {
+                          const qty = Number(form.quantity) || 1;
+                          setForm((prev) => ({
+                            ...prev,
+                            estimatedCost: String((selectedPart!.rawMaterialCost! * qty).toFixed(2)),
+                          }));
+                        }}
+                      >
+                        <Calculator className="h-4 w-4" />
+                      </Button>
+                    ) : null;
+                  })()}
+                </div>
+                <Select value={form.status} onValueChange={(value: "open" | "closed") => setForm((prev) => ({ ...prev, status: value }))}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="open">Open</SelectItem>
+                    <SelectItem value="closed">Closed</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm font-medium mb-1 block">Date Created</label>
+                  <Input
+                    type="date"
+                    value={form.dateCreated}
+                    onChange={(e) => setForm((prev) => ({ ...prev, dateCreated: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1 block">Date Closed</label>
+                  <Input
+                    type="date"
+                    value={form.dateClosed}
+                    onChange={(e) => setForm((prev) => ({ ...prev, dateClosed: e.target.value }))}
+                  />
+                </div>
+              </div>
+              <Textarea
+                placeholder="Note"
+                value={form.note}
+                onChange={(e) => setForm((prev) => ({ ...prev, note: e.target.value }))}
+                rows={3}
+              />
+              <div className="flex items-center gap-2">
+                <Button onClick={onSubmit} disabled={createMutation.isPending || updateMutation.isPending}>
+                  {editingId ? "Save Changes" : "Add Incident"}
+                </Button>
+                {(editingId || selectedIncidentId) && (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setEditingId(null);
+                      setSelectedIncidentId(null);
+                      setFormOpen(false);
+                      setForm(emptyForm);
                     }}
                   >
-                    <Calculator className="h-4 w-4" />
+                    {editingId ? "Cancel" : "Close"}
                   </Button>
-                ) : null;
-              })()}
-            </div>
-            <Select value={form.status} onValueChange={(value: "open" | "closed") => setForm((prev) => ({ ...prev, status: value }))}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="open">Open</SelectItem>
-                <SelectItem value="closed">Closed</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <label className="text-sm font-medium mb-1 block">Date Created</label>
-              <Input
-                type="date"
-                value={form.dateCreated}
-                onChange={(e) => setForm((prev) => ({ ...prev, dateCreated: e.target.value }))}
-              />
-            </div>
-            <div>
-              <label className="text-sm font-medium mb-1 block">Date Closed</label>
-              <Input
-                type="date"
-                value={form.dateClosed}
-                onChange={(e) => setForm((prev) => ({ ...prev, dateClosed: e.target.value }))}
-              />
-            </div>
-          </div>
-          <Textarea
-            placeholder="Note"
-            value={form.note}
-            onChange={(e) => setForm((prev) => ({ ...prev, note: e.target.value }))}
-            rows={3}
-          />
-          <div className="flex items-center gap-2">
-            <Button onClick={onSubmit} disabled={createMutation.isPending || updateMutation.isPending}>
-              {editingId ? "Save Changes" : "Add Incident"}
-            </Button>
-            {editingId && (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setEditingId(null);
-                  setFormOpen(false);
-                  setForm(emptyForm);
-                }}
-              >
-                Cancel
-              </Button>
-            )}
-          </div>
+                )}
+              </div>
+            </>
+          )}
         </CardContent>
         )}
       </Card>
@@ -489,7 +574,7 @@ export default function SpcData() {
                     const isExpanded = expandedNotes.has(row.id);
                     const shortNote = note.length > 60 ? `${note.slice(0, 60)}...` : note;
                     return (
-                    <tr key={row.id} className="border-t">
+                    <tr key={row.id} className="border-t cursor-pointer hover:bg-muted/40" onClick={() => openIncident(row)}>
                       <td className="p-2">{machineById.get(row.machineId)?.machineId || row.machineId}</td>
                       <td className="p-2">{row.partId ? (partById.get(row.partId)?.partNumber || <span className="text-xs text-muted-foreground">-</span>) : <span className="text-xs text-muted-foreground">-</span>}</td>
                       <td className="p-2">{row.characteristic}</td>
@@ -499,7 +584,10 @@ export default function SpcData() {
                         {note ? (
                           <button
                             type="button"
-                            onClick={() => toggleNote(row.id)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              toggleNote(row.id);
+                            }}
                             className="text-left text-xs text-muted-foreground hover:text-foreground"
                           >
                             {isExpanded ? note : shortNote}
@@ -516,11 +604,23 @@ export default function SpcData() {
                       <td className="p-2">{row.dateClosed || <span className="text-xs text-muted-foreground">-</span>}</td>
                       <td className="p-2 text-right">
                         <div className="inline-flex gap-2">
-                          <Button size="sm" variant="outline" onClick={() => startEdit(row)}>Edit</Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              startEdit(row);
+                            }}
+                          >
+                            Edit
+                          </Button>
                           <Button
                             size="sm"
                             variant="destructive"
-                            onClick={() => deleteMutation.mutate(row.id)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              deleteMutation.mutate(row.id);
+                            }}
                             disabled={deleteMutation.isPending}
                           >
                             Delete

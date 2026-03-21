@@ -355,6 +355,7 @@ export class DatabaseStorage implements IStorage {
     const updateObj: any = {};
     if (updates.charNumber !== undefined) updateObj.charNumber = updates.charNumber;
     if (updates.charName !== undefined) updateObj.charName = updates.charName;
+    if (updates.isAttributeCheck !== undefined) updateObj.isAttributeCheck = updates.isAttributeCheck;
     if (updates.nominalValue !== undefined) updateObj.nominalValue = updates.nominalValue;
     if (updates.charMax !== undefined) updateObj.charMax = updates.charMax;
     if (updates.charMin !== undefined) updateObj.charMin = updates.charMin;

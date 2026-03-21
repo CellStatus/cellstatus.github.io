@@ -7,8 +7,22 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart";
 import { MachineCard } from "@/components/machine-card";
 import { MachineDialog, type MachineSubmitData } from "@/components/machine-dialog";
+import {
+  Bar,
+  CartesianGrid,
+  ComposedChart,
+  Line,
+  XAxis,
+  YAxis,
+} from "recharts";
 import {
   Collapsible,
   CollapsibleContent,
@@ -51,6 +65,7 @@ type CostliestIncident = {
 
 type CharScrapSummary = {
   characteristic: string;
+  partNumber: string;
   totalCost: number;
   incidentCount: number;
   totalQuantity: number;
@@ -74,8 +89,15 @@ type MachineScrapSummary = {
 type PartScrapSummary = {
   partId: string | null;
   partNumber: string;
+  partName: string | null;
   totalCost: number;
   incidentCount: number;
+  totalQuantity: number;
+};
+
+type TimeRangeMetrics = {
+  incidentCount: number;
+  totalCost: number;
   totalQuantity: number;
 };
 
@@ -242,22 +264,21 @@ export default function Dashboard() {
     queryFn: async () => apiRequest("GET", "/api/characteristics"),
   });
 
-  // Only show open incidents on the dashboard
-  const openIncidents = useMemo(() => {
-    return (scrapIncidents || []).filter((incident) => incident.status !== 'closed');
+  const dashboardIncidents = useMemo(() => {
+    return scrapIncidents || [];
   }, [scrapIncidents]);
 
   const incidentsByMachine = useMemo(() => {
     const map: Record<string, ScrapIncident[]> = {};
-    (openIncidents || []).forEach((incident) => {
+    (dashboardIncidents || []).forEach((incident) => {
       if (!map[incident.machineId]) map[incident.machineId] = [];
       map[incident.machineId].push(incident);
     });
     return map;
-  }, [openIncidents]);
+  }, [dashboardIncidents]);
 
   const incidentsWithCost = useMemo<CostliestIncident[]>(() => {
-    return (openIncidents || [])
+    return (dashboardIncidents || [])
       .map((incident) => {
         const machine = machines.find((item) => item.id === incident.machineId);
         return {
@@ -272,7 +293,7 @@ export default function Dashboard() {
         };
       })
       .filter((incident) => incident.incidentCost >= 0);
-  }, [machines, openIncidents]);
+  }, [machines, dashboardIncidents]);
 
   const costliestIncidents = useMemo<CostliestIncident[]>(() => {
     return [...incidentsWithCost]
@@ -334,25 +355,8 @@ export default function Dashboard() {
   const charScrapSummary = useMemo<CharScrapSummary[]>(() => {
     const map = new Map<string, CharScrapSummary>();
     incidentsWithCost.forEach((incident) => {
-      const key = incident.characteristic;
-      const existing = map.get(key);
-      if (existing) {
-        existing.totalCost += incident.incidentCost;
-        existing.incidentCount += 1;
-        existing.totalQuantity += incident.quantity;
-      } else {
-        map.set(key, { characteristic: key, totalCost: incident.incidentCost, incidentCount: 1, totalQuantity: incident.quantity });
-      }
-    });
-    return Array.from(map.values()).sort((a, b) => b.totalCost - a.totalCost);
-  }, [incidentsWithCost]);
-
-  const partScrapSummary = useMemo<PartScrapSummary[]>(() => {
-    const map = new Map<string, PartScrapSummary>();
-    incidentsWithCost.forEach((incident) => {
-      const partId = incident.partId;
-      const key = partId || "unassigned";
-      const partNumber = partId ? (partById.get(partId)?.partNumber || "Unknown Part") : "Unassigned";
+      const partNumber = incident.partId ? (partById.get(incident.partId)?.partNumber || "Unknown Part") : "Unassigned";
+      const key = `${partNumber}::${incident.characteristic}`;
       const existing = map.get(key);
       if (existing) {
         existing.totalCost += incident.incidentCost;
@@ -360,7 +364,7 @@ export default function Dashboard() {
         existing.totalQuantity += incident.quantity;
       } else {
         map.set(key, {
-          partId,
+          characteristic: incident.characteristic,
           partNumber,
           totalCost: incident.incidentCost,
           incidentCount: 1,
@@ -370,6 +374,238 @@ export default function Dashboard() {
     });
     return Array.from(map.values()).sort((a, b) => b.totalCost - a.totalCost);
   }, [incidentsWithCost, partById]);
+
+  const partScrapSummary = useMemo<PartScrapSummary[]>(() => {
+    const map = new Map<string, PartScrapSummary>();
+    incidentsWithCost.forEach((incident) => {
+      const partId = incident.partId;
+      const key = partId || "unassigned";
+      const partNumber = partId ? (partById.get(partId)?.partNumber || "Unknown Part") : "Unassigned";
+      const partName = partId ? (partById.get(partId)?.partName || null) : null;
+      const existing = map.get(key);
+      if (existing) {
+        existing.totalCost += incident.incidentCost;
+        existing.incidentCount += 1;
+        existing.totalQuantity += incident.quantity;
+      } else {
+        map.set(key, {
+          partId,
+          partNumber,
+          partName,
+          totalCost: incident.incidentCost,
+          incidentCount: 1,
+          totalQuantity: incident.quantity,
+        });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => b.totalCost - a.totalCost);
+  }, [incidentsWithCost, partById]);
+
+  const timeRangeMetrics = useMemo(() => {
+    const now = new Date();
+
+    const startOfWeek = new Date(now);
+    const dayOffset = (startOfWeek.getDay() + 6) % 7;
+    startOfWeek.setDate(startOfWeek.getDate() - dayOffset);
+    startOfWeek.setHours(0, 0, 0, 0);
+
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfYear = new Date(now.getFullYear(), 0, 1);
+
+    const metrics: {
+      week: TimeRangeMetrics;
+      month: TimeRangeMetrics;
+      year: TimeRangeMetrics;
+    } = {
+      week: { incidentCount: 0, totalCost: 0, totalQuantity: 0 },
+      month: { incidentCount: 0, totalCost: 0, totalQuantity: 0 },
+      year: { incidentCount: 0, totalCost: 0, totalQuantity: 0 },
+    };
+
+    const resolveIncidentDate = (incident: ScrapIncident) => {
+      const rawDate = incident.dateCreated || incident.createdAt || incident.updatedAt;
+      if (!rawDate) return null;
+      const parsed = new Date(rawDate);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    };
+
+    dashboardIncidents.forEach((incident) => {
+      const incidentDate = resolveIncidentDate(incident);
+      if (!incidentDate) return;
+
+      const incidentCost = Number(incident.estimatedCost || 0);
+      const quantity = Number(incident.quantity || 0);
+
+      if (incidentDate >= startOfYear) {
+        metrics.year.incidentCount += 1;
+        metrics.year.totalCost += incidentCost;
+        metrics.year.totalQuantity += quantity;
+      }
+
+      if (incidentDate >= startOfMonth) {
+        metrics.month.incidentCount += 1;
+        metrics.month.totalCost += incidentCost;
+        metrics.month.totalQuantity += quantity;
+      }
+
+      if (incidentDate >= startOfWeek) {
+        metrics.week.incidentCount += 1;
+        metrics.week.totalCost += incidentCost;
+        metrics.week.totalQuantity += quantity;
+      }
+    });
+
+    return metrics;
+  }, [dashboardIncidents]);
+
+  const scrapCostTrendChart = useMemo(() => {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const months = Array.from({ length: 12 }, (_, index) => {
+      const date = new Date(now.getFullYear(), now.getMonth() - (11 - index), 1);
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+      const label = date.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
+      return { key, label, year: date.getFullYear() };
+    });
+
+    const monthSet = new Set(months.map((month) => month.key));
+    const monthTotals = new Map<string, number>();
+    const monthPartTotals = new Map<string, Map<string, number>>();
+    const partTotals = new Map<string, number>();
+
+    const resolveIncidentDate = (incident: ScrapIncident) => {
+      const rawDate = incident.dateCreated || incident.createdAt || incident.updatedAt;
+      if (!rawDate) return null;
+      const parsed = new Date(rawDate);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    };
+
+    dashboardIncidents.forEach((incident) => {
+      const incidentDate = resolveIncidentDate(incident);
+      if (!incidentDate) return;
+
+      const monthKey = `${incidentDate.getFullYear()}-${String(incidentDate.getMonth() + 1).padStart(2, "0")}`;
+      if (!monthSet.has(monthKey)) return;
+
+      const partNumber = incident.partId ? (partById.get(incident.partId)?.partNumber || "Unknown Part") : "Unassigned";
+      const incidentCost = Number(incident.estimatedCost || 0);
+
+      monthTotals.set(monthKey, (monthTotals.get(monthKey) || 0) + incidentCost);
+      partTotals.set(partNumber, (partTotals.get(partNumber) || 0) + incidentCost);
+
+      if (!monthPartTotals.has(monthKey)) {
+        monthPartTotals.set(monthKey, new Map());
+      }
+      const partCostMap = monthPartTotals.get(monthKey)!;
+      partCostMap.set(partNumber, (partCostMap.get(partNumber) || 0) + incidentCost);
+    });
+
+    const topPartNumbers = Array.from(partTotals.entries())
+      .sort((left, right) => right[1] - left[1])
+      .slice(0, 5)
+      .map(([partNumber]) => partNumber);
+
+    const partKeyByNumber = new Map<string, string>();
+    const cumulativeKeyByNumber = new Map<string, string>();
+    topPartNumbers.forEach((partNumber, index) => {
+      partKeyByNumber.set(partNumber, `part${index + 1}`);
+      cumulativeKeyByNumber.set(partNumber, `part${index + 1}Cumulative`);
+    });
+
+    const cumulativeRunningTotals = new Map<string, number>();
+
+    const chartData = months.map((month) => {
+      const row: Record<string, string | number> = {
+        period: month.label,
+        totalCost: monthTotals.get(month.key) || 0,
+        other: 0,
+      };
+
+      topPartNumbers.forEach((partNumber, index) => {
+        row[`part${index + 1}`] = 0;
+        row[`part${index + 1}Cumulative`] = null as unknown as number;
+      });
+
+      const partCostMap = monthPartTotals.get(month.key);
+      if (partCostMap) {
+        partCostMap.forEach((cost, partNumber) => {
+          const partKey = partKeyByNumber.get(partNumber);
+          if (partKey) {
+            row[partKey] = cost;
+          } else {
+            row.other = Number(row.other || 0) + cost;
+          }
+        });
+      }
+
+      topPartNumbers.forEach((partNumber) => {
+        const monthlyKey = partKeyByNumber.get(partNumber);
+        const cumulativeKey = cumulativeKeyByNumber.get(partNumber);
+        if (!monthlyKey || !cumulativeKey) return;
+
+        if (month.year === currentYear) {
+          const nextValue = (cumulativeRunningTotals.get(partNumber) || 0) + Number(row[monthlyKey] || 0);
+          cumulativeRunningTotals.set(partNumber, nextValue);
+          row[cumulativeKey] = nextValue;
+        } else {
+          row[cumulativeKey] = null as unknown as number;
+        }
+      });
+
+      return row;
+    });
+
+    const palette = [
+      "hsl(var(--chart-1))",
+      "hsl(var(--chart-2))",
+      "hsl(var(--chart-3))",
+      "hsl(var(--chart-4))",
+      "hsl(var(--chart-5))",
+    ];
+
+    const chartConfig: ChartConfig = {};
+    topPartNumbers.forEach((partNumber, index) => {
+      chartConfig[`part${index + 1}`] = {
+        label: `${partNumber} Monthly`,
+        color: palette[index % palette.length],
+      };
+      chartConfig[`part${index + 1}Cumulative`] = {
+        label: `${partNumber} YTD Accumulated`,
+        color: palette[index % palette.length],
+      };
+    });
+    chartConfig.other = {
+      label: "Other Parts Monthly",
+      color: "hsl(var(--muted-foreground))",
+    };
+
+    const hasOther = chartData.some((row) => Number(row.other || 0) > 0);
+    const hasCumulativeLines = chartData.some((row) =>
+      topPartNumbers.some((partNumber) => {
+        const cumulativeKey = cumulativeKeyByNumber.get(partNumber);
+        return cumulativeKey ? row[cumulativeKey] !== null : false;
+      })
+    );
+    const legendItems = [
+      ...topPartNumbers.map((partNumber, index) => ({
+        label: partNumber,
+        color: palette[index % palette.length],
+      })),
+      ...(hasOther
+        ? [{ label: "Other Parts", color: "hsl(var(--muted-foreground))" }]
+        : []),
+    ];
+
+    return {
+      chartConfig,
+      chartData,
+      cumulativeKeyByNumber,
+      hasCumulativeLines,
+      topPartNumbers,
+      hasOther,
+      legendItems,
+    };
+  }, [dashboardIncidents, partById]);
 
   const totalScrapCost = useMemo(() => {
     return costliestIncidents.reduce((sum, incident) => sum + incident.incidentCost, 0);
@@ -552,6 +788,135 @@ export default function Dashboard() {
           </Card>
         </div>
 
+        <div>
+          <h2 className="text-lg font-semibold mb-4">Weekly / Monthly / Yearly Scrap Metrics</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">This Week</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-rose-600">${timeRangeMetrics.week.totalCost.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">{timeRangeMetrics.week.incidentCount} incidents</p>
+                <p className="text-xs text-muted-foreground">{timeRangeMetrics.week.totalQuantity} pcs scrapped</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">This Month</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-rose-600">${timeRangeMetrics.month.totalCost.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">{timeRangeMetrics.month.incidentCount} incidents</p>
+                <p className="text-xs text-muted-foreground">{timeRangeMetrics.month.totalQuantity} pcs scrapped</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">This Year</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-rose-600">${timeRangeMetrics.year.totalCost.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">{timeRangeMetrics.year.incidentCount} incidents</p>
+                <p className="text-xs text-muted-foreground">{timeRangeMetrics.year.totalQuantity} pcs scrapped</p>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
+        <div>
+          <h2 className="text-lg font-semibold mb-4">Scrap Cost by Part Over Time</h2>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Last 12 Months with Current-Year Accumulated Trendlines</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ChartContainer config={scrapCostTrendChart.chartConfig} className="w-full h-[320px] aspect-auto">
+                <ComposedChart data={scrapCostTrendChart.chartData} margin={{ left: 8, right: 8, top: 8, bottom: 0 }}>
+                  <CartesianGrid vertical={false} />
+                  <XAxis
+                    dataKey="period"
+                    tickLine={false}
+                    axisLine={false}
+                    tickMargin={8}
+                    minTickGap={20}
+                  />
+                  <YAxis
+                    yAxisId="monthly"
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(value) => `$${Number(value).toLocaleString()}`}
+                    width={72}
+                  />
+                  <YAxis
+                    yAxisId="cumulative"
+                    orientation="right"
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(value) => `$${Number(value).toLocaleString()}`}
+                    width={72}
+                  />
+                  <ChartTooltip
+                    content={
+                      <ChartTooltipContent
+                        formatter={(value, name) => (
+                          <>
+                            <span>{String(name)}</span>
+                            <span className="ml-auto font-mono">${Number(value).toLocaleString()}</span>
+                          </>
+                        )}
+                      />
+                    }
+                  />
+                  {scrapCostTrendChart.topPartNumbers.map((partNumber, index) => (
+                    <Bar
+                      key={`part${index + 1}`}
+                      dataKey={`part${index + 1}`}
+                      name={`${partNumber} Monthly`}
+                      yAxisId="monthly"
+                      stackId="scrap"
+                      radius={index === 0 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+                    />
+                  ))}
+                  {scrapCostTrendChart.hasOther ? <Bar dataKey="other" name="Other Parts Monthly" yAxisId="monthly" stackId="scrap" /> : null}
+                  {scrapCostTrendChart.topPartNumbers.map((partNumber, index) => {
+                    const cumulativeKey = scrapCostTrendChart.cumulativeKeyByNumber.get(partNumber);
+                    if (!cumulativeKey) return null;
+                    return (
+                      <Line
+                        key={cumulativeKey}
+                        type="monotone"
+                        dataKey={cumulativeKey}
+                        name={`${partNumber} YTD Accumulated`}
+                        yAxisId="cumulative"
+                        stroke={`hsl(var(--chart-${(index % 5) + 1}))`}
+                        strokeWidth={2.25}
+                        dot={{ r: 2 }}
+                        activeDot={{ r: 4 }}
+                        connectNulls={false}
+                      />
+                    );
+                  })}
+                </ComposedChart>
+              </ChartContainer>
+              <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+                {scrapCostTrendChart.legendItems.map((item) => (
+                  <div key={item.label} className="flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: item.color }} />
+                    <span className="h-0.5 w-5" style={{ backgroundColor: item.color }} />
+                    <span>{item.label}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Bars show monthly scrap cost. Lines show current-year accumulated scrap cost by part number. Legend is shown below the graph.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+
         {/* Scrap Incidents by Cell */}
         <div>
           <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
@@ -562,12 +927,12 @@ export default function Dashboard() {
             {cellScrapSummary.length === 0 ? (
               <Card>
                 <CardContent>
-                  <div className="text-sm text-muted-foreground">No open scrap incidents by cell</div>
+                  <div className="text-sm text-muted-foreground">No scrap incidents by cell</div>
                 </CardContent>
               </Card>
             ) : (
               cellScrapSummary.map((cell) => (
-                <Card key={cell.cellName} {...clickableCardProps(() => goToSpcData({ cell: cell.cellName }))}>
+                <Card key={cell.cellName} {...clickableCardProps(() => setLocation(`/cells?cell=${encodeURIComponent(cell.cellName)}`))}>
                   <CardHeader>
                     <CardTitle className="text-sm font-medium">{cell.cellName}</CardTitle>
                   </CardHeader>
@@ -660,10 +1025,11 @@ export default function Dashboard() {
                 ) : (
                   <div className="space-y-2">
                     {charScrapSummary.slice(0, 5).map((char, idx) => (
-                      <div key={char.characteristic} className="flex items-center justify-between">
+                      <div key={`${char.partNumber}-${char.characteristic}`} className="flex items-center justify-between">
                         <div className="min-w-0">
                           <div className="text-xs text-muted-foreground">#{idx + 1}</div>
-                          <div className="text-sm truncate">{char.characteristic}</div>
+                          <div className="text-sm truncate">Char # {char.characteristic}</div>
+                          <div className="text-xs text-muted-foreground truncate">Part: {char.partNumber}</div>
                           <div className="text-xs text-muted-foreground">{char.totalQuantity} pc{char.totalQuantity !== 1 ? "s" : ""} scrapped</div>
                         </div>
                         <div className="font-semibold text-rose-600">${char.totalCost.toLocaleString()}</div>
@@ -686,7 +1052,7 @@ export default function Dashboard() {
                       <div key={`${part.partId || "unassigned"}-${idx}`} className="flex items-center justify-between">
                         <div className="min-w-0">
                           <div className="text-xs text-muted-foreground">#{idx + 1}</div>
-                          <div className="text-sm truncate">{part.partNumber}</div>
+                          <div className="text-sm truncate">{part.partName ? `${part.partNumber} - ${part.partName}` : part.partNumber}</div>
                           <div className="text-xs text-muted-foreground">{part.totalQuantity} pc{part.totalQuantity !== 1 ? "s" : ""} scrapped</div>
                         </div>
                         <div className="font-semibold text-rose-600">${part.totalCost.toLocaleString()}</div>

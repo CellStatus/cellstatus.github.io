@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -68,8 +68,9 @@ function parseOperations(value: unknown): CellOperation[] {
 
 export default function CellsPage() {
   const { toast } = useToast();
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [isEditingCell, setIsEditingCell] = useState(false);
   const [configOpen, setConfigOpen] = useState(true);
   const [name, setName] = useState("New Cell");
   const [description, setDescription] = useState("");
@@ -94,6 +95,26 @@ export default function CellsPage() {
   });
 
   const selectedCell = cells.find((cell) => cell.id === selectedId) || null;
+  const isViewMode = selectedCell !== null && !isEditingCell;
+
+  useEffect(() => {
+    const queryIndex = location.indexOf("?");
+    if (queryIndex === -1) return;
+
+    const search = new URLSearchParams(location.slice(queryIndex + 1));
+    const targetCell = search.get("cell");
+    if (!targetCell) return;
+
+    const match = cells.find((cell) => cell.name === targetCell || cell.id === targetCell);
+    if (!match || match.id === selectedId) return;
+
+    setSelectedId(match.id);
+    setName(match.name || "");
+    setDescription(match.description || "");
+    setStatus(match.status || "1");
+    setOperations(parseOperations(match.operationsJson));
+    setMachinePickerByOperation({});
+  }, [cells, location, selectedId]);
 
   const machineById = useMemo(() => {
     const map = new Map<string, Machine>();
@@ -119,10 +140,17 @@ export default function CellsPage() {
     [allMachines, assignedMachineIds],
   );
 
-  const getOperationCycleTimeSec = (operation: CellOperation): number | null => {
-    const cycleTimes = (operation.machineIds ?? [])
-      .map((machineId) => machineById.get(machineId)?.idealCycleTime ?? null)
+  const getOperationContributingCycleTimes = (operation: CellOperation): number[] => {
+    return (operation.machineIds ?? [])
+      .map((machineId) => machineById.get(machineId))
+      .filter((machine): machine is Machine => Boolean(machine))
+      .filter((machine) => machine.status !== "down")
+      .map((machine) => machine.idealCycleTime ?? null)
       .filter((cycleTime): cycleTime is number => typeof cycleTime === "number" && cycleTime > 0);
+  };
+
+  const getOperationCycleTimeSec = (operation: CellOperation): number | null => {
+    const cycleTimes = getOperationContributingCycleTimes(operation);
 
     if (cycleTimes.length === 0) return null;
 
@@ -230,6 +258,7 @@ export default function CellsPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/cells"] });
       queryClient.invalidateQueries({ queryKey: ["/api/machines"] });
       setSelectedId(saved.id);
+      setIsEditingCell(false);
       toast({ title: "Cell saved" });
     },
     onError: () => toast({ title: "Failed to save cell", variant: "destructive" }),
@@ -240,6 +269,7 @@ export default function CellsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/cells"] });
       setSelectedId(null);
+      setIsEditingCell(false);
       setName("New Cell");
       setDescription("");
       setStatus("1");
@@ -252,6 +282,7 @@ export default function CellsPage() {
 
   const loadCell = (cell: CellConfiguration) => {
     setSelectedId(cell.id);
+    setIsEditingCell(false);
     setName(cell.name || "");
     setDescription(cell.description || "");
     setStatus(cell.status || "1");
@@ -315,6 +346,7 @@ export default function CellsPage() {
               className="w-full"
               onClick={() => {
                 setSelectedId(null);
+                setIsEditingCell(true);
                 setName("New Cell");
                 setDescription("");
                 setStatus("1");
@@ -394,6 +426,56 @@ export default function CellsPage() {
             </CardHeader>
             {configOpen && (
             <CardContent className="space-y-3">
+              {isViewMode ? (
+                <>
+                  <div className="grid md:grid-cols-3 gap-3">
+                    <div>
+                      <Label>Name</Label>
+                      <div className="text-sm font-medium mt-1">{name || "-"}</div>
+                    </div>
+                    <div>
+                      <Label>Cell Number</Label>
+                      <div className="text-sm font-medium mt-1">{status || "-"}</div>
+                    </div>
+                    <div>
+                      <Label>Description</Label>
+                      <div className="text-sm font-medium mt-1">{description || "-"}</div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Operations</Label>
+                    {operations.length === 0 ? (
+                      <div className="text-sm text-muted-foreground">No operations added yet.</div>
+                    ) : (
+                      operations.map((operation, index) => (
+                        <div key={operation.id} className="rounded border p-2">
+                          <div className="font-medium">{operation.name || `Operation ${index + 1}`}</div>
+                          <div className="text-xs text-muted-foreground">
+                            Effective Operation Cycle Time: {(() => {
+                              const operationCycleTimeSec = getOperationCycleTimeSec(operation);
+                              if (operationCycleTimeSec == null) return "Unavailable (no assigned machine cycle times)";
+                              const machineCount = getOperationContributingCycleTimes(operation).length;
+                              if (machineCount <= 1) return `${operationCycleTimeSec.toFixed(1)}s`;
+                              return `${operationCycleTimeSec.toFixed(1)}s (based on ${machineCount} machines in parallel)`;
+                            })()}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="flex gap-2">
+                    <Button onClick={() => setIsEditingCell(true)}>
+                      <Save className="h-4 w-4 mr-2" />Edit Cell
+                    </Button>
+                    {selectedCell && (
+                      <Button variant="destructive" onClick={() => setDeleteConfirmOpen(true)}>Delete Cell</Button>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
               <div className="grid md:grid-cols-3 gap-3">
                 <div>
                   <Label>Name</Label>
@@ -447,7 +529,7 @@ export default function CellsPage() {
                           {(() => {
                             const operationCycleTimeSec = getOperationCycleTimeSec(operation);
                             if (operationCycleTimeSec == null) return "Unavailable (no assigned machine cycle times)";
-                            const machineCount = (operation.machineIds ?? []).length;
+                            const machineCount = getOperationContributingCycleTimes(operation).length;
                             if (machineCount <= 1) return `${operationCycleTimeSec.toFixed(1)}s`;
                             return `${operationCycleTimeSec.toFixed(1)}s (based on ${machineCount} machines in parallel)`;
                           })()}
@@ -524,6 +606,8 @@ export default function CellsPage() {
                   <Button variant="destructive" onClick={() => setDeleteConfirmOpen(true)}>Delete Cell</Button>
                 )}
               </div>
+                </>
+              )}
             </CardContent>
             )}
           </Card>
@@ -552,8 +636,8 @@ export default function CellsPage() {
                           <div className="text-xs text-muted-foreground">
                             Effective Operation Cycle Time:{" "}
                             {operationCycleTimeSec != null
-                              ? (opMachineIds.length > 1
-                                  ? `${operationCycleTimeSec.toFixed(1)}s (based on ${opMachineIds.length} machines in parallel)`
+                              ? (getOperationContributingCycleTimes(operation).length > 1
+                                  ? `${operationCycleTimeSec.toFixed(1)}s (based on ${getOperationContributingCycleTimes(operation).length} machines in parallel)`
                                   : `${operationCycleTimeSec.toFixed(1)}s`)
                               : "Unavailable (no assigned machine cycle times)"}
                           </div>

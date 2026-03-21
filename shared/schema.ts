@@ -1,4 +1,4 @@
-import { pgTable, text, varchar, integer, real, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, real, jsonb, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -119,6 +119,7 @@ export const characteristics = pgTable("characteristics", {
   partId: varchar("part_id"),  // FK → parts.id (optional)
   charNumber: text("char_number").notNull(),
   charName: text("char_name"),
+  isAttributeCheck: boolean("is_attribute_check").notNull().default(false),
   nominalValue: text("nominal_value"),
   charMax: text("char_max"),
   charMin: text("char_min"),

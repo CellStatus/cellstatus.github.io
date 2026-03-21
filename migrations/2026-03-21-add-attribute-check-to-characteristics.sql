@@ -1,0 +1,2 @@
+ALTER TABLE characteristics
+ADD COLUMN IF NOT EXISTS is_attribute_check BOOLEAN NOT NULL DEFAULT FALSE;

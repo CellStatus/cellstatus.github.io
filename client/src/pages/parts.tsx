@@ -29,7 +29,7 @@ const emptyForm: PartForm = {
 export default function PartsPage() {
   const { toast } = useToast();
   const [form, setForm] = useState<PartForm>(emptyForm);
-  const [newPartOpen, setNewPartOpen] = useState(true);
+  const [newPartOpen, setNewPartOpen] = useState(false);
   const [editingPartId, setEditingPartId] = useState<string | null>(null);
 
   const { data: parts = [] } = useQuery<Part[]>({
