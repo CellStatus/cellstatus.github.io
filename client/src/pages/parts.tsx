@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Pencil, Plus, Trash2 } from "lucide-react";
 import type { Part } from "@shared/schema";
 
 type PartForm = {
@@ -30,6 +30,7 @@ export default function PartsPage() {
   const { toast } = useToast();
   const [form, setForm] = useState<PartForm>(emptyForm);
   const [newPartOpen, setNewPartOpen] = useState(true);
+  const [editingPartId, setEditingPartId] = useState<string | null>(null);
 
   const { data: parts = [] } = useQuery<Part[]>({
     queryKey: ["/api/parts"],
@@ -53,6 +54,24 @@ export default function PartsPage() {
     onError: () => toast({ title: "Failed to add part", variant: "destructive" }),
   });
 
+  const updateMutation = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: PartForm }) =>
+      apiRequest("PATCH", `/api/parts/${id}`, {
+        partNumber: payload.partNumber.trim(),
+        partName: payload.partName.trim() || null,
+        material: payload.material.trim() || null,
+        rawMaterialCost: payload.rawMaterialCost.trim() ? Number(payload.rawMaterialCost) : null,
+        notes: payload.notes.trim() || null,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/parts"] });
+      setForm(emptyForm);
+      setEditingPartId(null);
+      toast({ title: "Part updated" });
+    },
+    onError: () => toast({ title: "Failed to update part", variant: "destructive" }),
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (id: string) => apiRequest("DELETE", `/api/parts/${id}`),
     onSuccess: () => {
@@ -63,6 +82,34 @@ export default function PartsPage() {
     onError: () => toast({ title: "Failed to delete part", variant: "destructive" }),
   });
 
+  const startEdit = (part: Part) => {
+    setEditingPartId(part.id);
+    setNewPartOpen(true);
+    setForm({
+      partNumber: part.partNumber,
+      partName: part.partName || "",
+      material: part.material || "",
+      rawMaterialCost: part.rawMaterialCost != null ? String(part.rawMaterialCost) : "",
+      notes: part.notes || "",
+    });
+  };
+
+  const onSubmit = () => {
+    if (!form.partNumber.trim()) {
+      toast({ title: "Part Number is required", variant: "destructive" });
+      return;
+    }
+    if (form.rawMaterialCost.trim() && Number(form.rawMaterialCost) < 0) {
+      toast({ title: "Raw Material Cost must be non-negative", variant: "destructive" });
+      return;
+    }
+    if (editingPartId) {
+      updateMutation.mutate({ id: editingPartId, payload: form });
+    } else {
+      createMutation.mutate(form);
+    }
+  };
+
   return (
     <div className="p-6 h-full overflow-y-auto space-y-4">
       <div>
@@ -71,10 +118,15 @@ export default function PartsPage() {
       </div>
 
       <Card>
-        <CardHeader className="cursor-pointer select-none" onClick={() => setNewPartOpen((open) => !open)}>
+        <CardHeader
+          className="cursor-pointer select-none"
+          onClick={() => {
+            if (!editingPartId) setNewPartOpen((open) => !open);
+          }}
+        >
           <div className="flex items-center justify-between">
-            <CardTitle>New Part</CardTitle>
-            {newPartOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            <CardTitle>{editingPartId ? "Edit Part" : "New Part"}</CardTitle>
+            {!editingPartId && (newPartOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />)}
           </div>
         </CardHeader>
         {newPartOpen && (
@@ -127,22 +179,25 @@ export default function PartsPage() {
             />
           </div>
 
-          <Button
-            onClick={() => {
-              if (!form.partNumber.trim()) {
-                toast({ title: "Part Number is required", variant: "destructive" });
-                return;
-              }
-              if (form.rawMaterialCost.trim() && Number(form.rawMaterialCost) < 0) {
-                toast({ title: "Raw Material Cost must be non-negative", variant: "destructive" });
-                return;
-              }
-              createMutation.mutate(form);
-            }}
-            disabled={createMutation.isPending}
-          >
-            <Plus className="h-4 w-4 mr-1" /> Add Part
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={onSubmit}
+              disabled={createMutation.isPending || updateMutation.isPending}
+            >
+              {editingPartId ? "Save Changes" : <><Plus className="h-4 w-4 mr-1" /> Add Part</>}
+            </Button>
+            {editingPartId && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setEditingPartId(null);
+                  setForm(emptyForm);
+                }}
+              >
+                Cancel
+              </Button>
+            )}
+          </div>
         </CardContent>
         )}
       </Card>
@@ -180,14 +235,23 @@ export default function PartsPage() {
                       </td>
                       <td className="p-2">{part.notes || <span className="text-muted-foreground">-</span>}</td>
                       <td className="p-2 text-right">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => deleteMutation.mutate(part.id)}
-                          disabled={deleteMutation.isPending}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <div className="inline-flex gap-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => startEdit(part)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => deleteMutation.mutate(part.id)}
+                            disabled={deleteMutation.isPending}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   ))}

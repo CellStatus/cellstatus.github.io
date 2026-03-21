@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { exportDashboardStatusPdf } from "@/lib/dashboard-report";
 import { 
   Search,
   Factory,
@@ -33,13 +34,9 @@ import {
   Cog,
   ChevronDown,
   ChevronRight,
+  FileDown,
 } from "lucide-react";
-import type { Machine, MachineStatus, Part, ScrapIncident } from "@shared/schema";
-
-type CellConfiguration = {
-  id: string;
-  name: string;
-};
+import type { CellConfiguration, Characteristic, Machine, MachineStatus, Part, ScrapIncident } from "@shared/schema";
 
 type CostliestIncident = {
   id: string;
@@ -91,13 +88,14 @@ export default function Dashboard() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deletingMachineId, setDeletingMachineId] = useState<string | null>(null);
   const [expandedCells, setExpandedCells] = useState<Set<string>>(new Set());
+  const [isExportingReport, setIsExportingReport] = useState(false);
 
   // Fetch machines
   const { data: machines = [], isLoading: machinesLoading } = useQuery<Machine[]>({
     queryKey: ["/api/machines"],
   });
 
-  const { data: cells = [] } = useQuery<CellConfiguration[]>({
+  const { data: cells = [], isLoading: cellsLoading } = useQuery<CellConfiguration[]>({
     queryKey: ["/api/cells"],
     queryFn: async () => apiRequest("GET", "/api/cells"),
   });
@@ -229,14 +227,19 @@ export default function Dashboard() {
   }, [filteredMachines]);
 
   // Fetch scrap incidents and group by machine
-  const { data: scrapIncidents = [] } = useQuery<ScrapIncident[]>({
+  const { data: scrapIncidents = [], isLoading: incidentsLoading } = useQuery<ScrapIncident[]>({
     queryKey: ['/api/scrap-incidents'],
     queryFn: async () => apiRequest('GET', '/api/scrap-incidents'),
   });
 
-  const { data: parts = [] } = useQuery<Part[]>({
+  const { data: parts = [], isLoading: partsLoading } = useQuery<Part[]>({
     queryKey: ['/api/parts'],
     queryFn: async () => apiRequest('GET', '/api/parts'),
+  });
+
+  const { data: characteristics = [], isLoading: characteristicsLoading } = useQuery<Characteristic[]>({
+    queryKey: ["/api/characteristics"],
+    queryFn: async () => apiRequest("GET", "/api/characteristics"),
   });
 
   // Only show open incidents on the dashboard
@@ -402,9 +405,32 @@ export default function Dashboard() {
     setDeleteConfirmOpen(true);
   };
 
+  const handleExportReport = async () => {
+    try {
+      setIsExportingReport(true);
+      exportDashboardStatusPdf({
+        machines,
+        cells,
+        parts,
+        characteristics,
+        scrapIncidents,
+      });
+      toast({ title: "PDF report generated" });
+    } catch (error) {
+      console.error("Failed to generate dashboard PDF report", error);
+      toast({
+        title: "Failed to generate PDF report",
+        variant: "destructive",
+      });
+    } finally {
+      setIsExportingReport(false);
+    }
+  };
+
   // Calculate summary stats
   const runningMachines = machines.filter(m => m.status === "running").length;
   const machinesWithCycleTime = machines.filter(m => m.idealCycleTime && m.idealCycleTime > 0).length;
+  const reportLoading = machinesLoading || cellsLoading || incidentsLoading || partsLoading || characteristicsLoading;
 
   return (
     <div className="flex flex-col h-full overflow-auto">
@@ -422,7 +448,6 @@ export default function Dashboard() {
               </p>
             </div>
           </div>
-          
         </div>
       </div>
 
@@ -509,7 +534,7 @@ export default function Dashboard() {
               )}
             </CardContent>
           </Card>
-          <Card>
+          <Card {...clickableCardProps(() => highestScrapCell && goToSpcData({ cell: highestScrapCell.cellName }))}>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">Highest Scrap Cell</CardTitle>
             </CardHeader>
@@ -542,7 +567,7 @@ export default function Dashboard() {
               </Card>
             ) : (
               cellScrapSummary.map((cell) => (
-                <Card key={cell.cellName}>
+                <Card key={cell.cellName} {...clickableCardProps(() => goToSpcData({ cell: cell.cellName }))}>
                   <CardHeader>
                     <CardTitle className="text-sm font-medium">{cell.cellName}</CardTitle>
                   </CardHeader>
@@ -607,14 +632,19 @@ export default function Dashboard() {
                 ) : (
                   <div className="space-y-2">
                     {cellScrapSummary.slice(0, 5).map((cell, idx) => (
-                      <div key={cell.cellName} className="flex items-center justify-between">
+                      <button
+                        key={cell.cellName}
+                        type="button"
+                        onClick={() => goToSpcData({ cell: cell.cellName })}
+                        className="flex w-full items-center justify-between text-left"
+                      >
                         <div className="min-w-0">
                           <div className="text-xs text-muted-foreground">#{idx + 1}</div>
                           <div className="text-sm truncate">{cell.cellName}</div>
                           <div className="text-xs text-muted-foreground">{cell.totalQuantity} pc{cell.totalQuantity !== 1 ? "s" : ""} scrapped</div>
                         </div>
                         <div className="font-semibold text-rose-600">${cell.totalCost.toLocaleString()}</div>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 )}
@@ -786,6 +816,17 @@ export default function Dashboard() {
               })}
             </div>
           )}
+        </div>
+
+        <div className="flex justify-end pt-2">
+          <Button
+            variant="outline"
+            onClick={handleExportReport}
+            disabled={reportLoading || isExportingReport}
+          >
+            <FileDown className="mr-2 h-4 w-4" />
+            {isExportingReport ? "Generating PDF..." : "Export PDF Report"}
+          </Button>
         </div>
       </div>
 

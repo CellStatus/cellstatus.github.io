@@ -7,8 +7,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { ChevronDown, ChevronUp } from "lucide-react";
-import type { Machine, ScrapIncident, Characteristic } from "@shared/schema";
+import { ChevronDown, ChevronUp, Calculator } from "lucide-react";
+import type { Machine, ScrapIncident, Characteristic, Part } from "@shared/schema";
 
 type IncidentForm = {
   machineId: string;
@@ -40,6 +40,7 @@ export default function SpcData() {
   const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [filterMachineId, setFilterMachineId] = useState<string | null>(null);
+  const [filterCellName, setFilterCellName] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<IncidentForm>(emptyForm);
   const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set());
@@ -60,14 +61,23 @@ export default function SpcData() {
     queryFn: async () => apiRequest("GET", "/api/characteristics"),
   });
 
+  const { data: parts = [] } = useQuery<Part[]>({
+    queryKey: ["/api/parts"],
+    queryFn: async () => apiRequest("GET", "/api/parts"),
+  });
+
   useEffect(() => {
     try {
       const u = new URL(window.location.href);
       const machineId = u.searchParams.get("machineId");
+      const cell = u.searchParams.get("cell");
       const char = u.searchParams.get("char");
       if (machineId) {
         setForm((prev) => ({ ...prev, machineId }));
         setFilterMachineId(machineId);
+      }
+      if (cell) {
+        setFilterCellName(cell);
       }
       if (char) setSearch(char);
     } catch {
@@ -81,20 +91,36 @@ export default function SpcData() {
     return map;
   }, [machines]);
 
+  const partById = useMemo(() => {
+    const map = new Map<string, Part>();
+    parts.forEach((p) => map.set(p.id, p));
+    return map;
+  }, [parts]);
+
+  const filteredCharacteristics = useMemo(() => {
+    if (!form.partId) return [];
+    return characteristics.filter((char) => char.partId === form.partId);
+  }, [characteristics, form.partId]);
+
   const rows = useMemo(() => {
     return incidents
       .filter((incident) => {
         if (filterMachineId && incident.machineId !== filterMachineId) return false;
+        if (filterCellName) {
+          const machineCell = machineById.get(incident.machineId)?.cell || "Unassigned";
+          if (machineCell !== filterCellName) return false;
+        }
         if (!search.trim()) return true;
         const machineLabel = machineById.get(incident.machineId)?.machineId || machineById.get(incident.machineId)?.name || "";
         const needle = search.toLowerCase();
-        return [incident.characteristic, machineLabel, incident.status]
+        const partNumber = incident.partId ? partById.get(incident.partId)?.partNumber || "" : "";
+        return [partNumber, incident.characteristic, machineLabel, incident.status]
           .join(" ")
           .toLowerCase()
           .includes(needle);
       })
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-  }, [incidents, machineById, search, filterMachineId]);
+  }, [incidents, machineById, partById, search, filterMachineId, filterCellName]);
 
   const characteristicLabel = (char: Characteristic) =>
     char.charName ? `${char.charNumber} – ${char.charName}` : char.charNumber;
@@ -106,6 +132,8 @@ export default function SpcData() {
     });
     return map;
   }, [characteristics]);
+
+  const selectedPart = form.partId ? partById.get(form.partId) : undefined;
 
   const createMutation = useMutation({
     mutationFn: (payload: IncidentForm) =>
@@ -166,10 +194,10 @@ export default function SpcData() {
   });
 
   const onSubmit = async () => {
-    if (!form.machineId || !form.characteristic.trim() || !form.quantity.trim() || !form.estimatedCost.trim()) {
+    if (!form.machineId || !form.partId || !form.characteristic.trim() || !form.quantity.trim() || !form.estimatedCost.trim()) {
       toast({
         title: "Missing required fields",
-        description: "Machine, characteristic, quantity, and estimated cost are required.",
+        description: "Machine, part number, characteristic, quantity, and estimated cost are required.",
         variant: "destructive",
       });
       return;
@@ -220,25 +248,34 @@ export default function SpcData() {
     });
   };
 
+  const clearFilters = () => {
+    setFilterMachineId(null);
+    setFilterCellName(null);
+    try {
+      window.history.replaceState({}, "", "/spc-data");
+    } catch {
+      // ignore
+    }
+  };
+
   return (
     <div className="p-6 h-full overflow-y-auto space-y-4">
       <div>
         <h2 className="text-lg font-semibold">Scrap Incidents</h2>
         <p className="text-sm text-muted-foreground">Track incidents by machine, characteristic, quantity, and estimated cost.</p>
-        {filterMachineId && (
+        {(filterMachineId || filterCellName) && (
           <div className="text-sm text-muted-foreground mt-1">
-            Filtering by machine: {machineById.get(filterMachineId)?.name || filterMachineId}
+            {filterMachineId && (
+              <span>
+                Filtering by machine: {machineById.get(filterMachineId)?.name || filterMachineId}
+              </span>
+            )}
+            {filterMachineId && filterCellName && <span className="mx-2">|</span>}
+            {filterCellName && <span>Filtering by cell: {filterCellName}</span>}
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => {
-                setFilterMachineId(null);
-                try {
-                  window.history.replaceState({}, "", "/spc-data");
-                } catch {
-                  // ignore
-                }
-              }}
+              onClick={clearFilters}
             >
               Clear
             </Button>
@@ -260,7 +297,7 @@ export default function SpcData() {
         </CardHeader>
         {(formOpen || editingId) && (
         <CardContent className="space-y-3">
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
             <Select value={form.machineId} onValueChange={(value) => setForm((prev) => ({ ...prev, machineId: value }))}>
               <SelectTrigger>
                 <SelectValue placeholder="Machine *" />
@@ -274,21 +311,48 @@ export default function SpcData() {
               </SelectContent>
             </Select>
             <Select
+              value={form.partId ?? undefined}
+              onValueChange={(value) => {
+                setForm((prev) => {
+                  const nextPartId = value;
+                  const nextCharacteristic = prev.characteristic
+                    && characteristicByLabel.get(prev.characteristic)?.partId === nextPartId
+                    ? prev.characteristic
+                    : "";
+                  return {
+                    ...prev,
+                    partId: nextPartId,
+                    characteristic: nextCharacteristic,
+                  };
+                });
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Part Number *" />
+              </SelectTrigger>
+              <SelectContent>
+                {parts.map((part) => (
+                  <SelectItem key={part.id} value={part.id}>
+                    {part.partName ? `${part.partNumber} - ${part.partName}` : part.partNumber}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
               value={form.characteristic}
               onValueChange={(value) => {
-                const selected = characteristicByLabel.get(value);
                 setForm((prev) => ({
                   ...prev,
                   characteristic: value,
-                  partId: selected?.partId ?? null,
                 }));
               }}
+              disabled={!form.partId}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Characteristic *" />
               </SelectTrigger>
               <SelectContent>
-                {characteristics.map((char) => (
+                {filteredCharacteristics.map((char) => (
                   <SelectItem key={char.id} value={characteristicLabel(char)}>
                     {characteristicLabel(char)}
                   </SelectItem>
@@ -302,14 +366,36 @@ export default function SpcData() {
               value={form.quantity}
               onChange={(e) => setForm((prev) => ({ ...prev, quantity: e.target.value }))}
             />
-            <Input
-              type="number"
-              min={0}
-              step="0.01"
-              placeholder="Estimated Cost *"
-              value={form.estimatedCost}
-              onChange={(e) => setForm((prev) => ({ ...prev, estimatedCost: e.target.value }))}
-            />
+            <div className="flex gap-1 items-center">
+              <Input
+                type="number"
+                min={0}
+                step="0.01"
+                placeholder="Estimated Cost *"
+                value={form.estimatedCost}
+                onChange={(e) => setForm((prev) => ({ ...prev, estimatedCost: e.target.value }))}
+              />
+              {(() => {
+                const canCalc = selectedPart?.rawMaterialCost != null;
+                return canCalc ? (
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="outline"
+                    title={`Calculate: $${selectedPart!.rawMaterialCost} × qty`}
+                    onClick={() => {
+                      const qty = Number(form.quantity) || 1;
+                      setForm((prev) => ({
+                        ...prev,
+                        estimatedCost: String((selectedPart!.rawMaterialCost! * qty).toFixed(2)),
+                      }));
+                    }}
+                  >
+                    <Calculator className="h-4 w-4" />
+                  </Button>
+                ) : null;
+              })()}
+            </div>
             <Select value={form.status} onValueChange={(value: "open" | "closed") => setForm((prev) => ({ ...prev, status: value }))}>
               <SelectTrigger>
                 <SelectValue />
@@ -371,7 +457,7 @@ export default function SpcData() {
             <CardTitle>Incident Log</CardTitle>
             <Input
               className="max-w-sm"
-              placeholder="Search by machine, characteristic, status..."
+              placeholder="Search by part, machine, characteristic, status..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -386,6 +472,7 @@ export default function SpcData() {
                 <thead>
                   <tr className="text-xs text-muted-foreground">
                     <th className="text-left p-2">Machine</th>
+                    <th className="text-left p-2">Part Number</th>
                     <th className="text-left p-2">Characteristic</th>
                     <th className="text-left p-2">Quantity</th>
                     <th className="text-left p-2">Estimated Cost</th>
@@ -404,6 +491,7 @@ export default function SpcData() {
                     return (
                     <tr key={row.id} className="border-t">
                       <td className="p-2">{machineById.get(row.machineId)?.machineId || row.machineId}</td>
+                      <td className="p-2">{row.partId ? (partById.get(row.partId)?.partNumber || <span className="text-xs text-muted-foreground">-</span>) : <span className="text-xs text-muted-foreground">-</span>}</td>
                       <td className="p-2">{row.characteristic}</td>
                       <td className="p-2">{row.quantity}</td>
                       <td className="p-2">${row.estimatedCost.toLocaleString()}</td>

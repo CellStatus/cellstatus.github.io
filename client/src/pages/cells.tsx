@@ -6,6 +6,16 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { AlertTriangle, ChevronDown, ChevronRight, Clock, Plus, Save, Trash2, X } from "lucide-react";
@@ -66,6 +76,7 @@ export default function CellsPage() {
   const [status, setStatus] = useState("1");
   const [operations, setOperations] = useState<CellOperation[]>([]);
   const [machinePickerByOperation, setMachinePickerByOperation] = useState<Record<string, string>>({});
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   const { data: cells = [] } = useQuery<CellConfiguration[]>({
     queryKey: ["/api/cells"],
@@ -138,18 +149,29 @@ export default function CellsPage() {
     return map;
   }, [cellIncidents]);
 
-  const bottleneck = useMemo(() => {
-    if (cellMachines.length === 0) return null;
-    return cellMachines.reduce((longest, m) =>
-      (m.idealCycleTime ?? 0) > (longest.idealCycleTime ?? 0) ? m : longest
-    );
-  }, [cellMachines]);
+  const operationCycleTimes = useMemo(() => {
+    return operations.map((operation, index) => ({
+      operation,
+      operationLabel: operation.name || `Operation ${index + 1}`,
+      cycleTimeSec: getOperationCycleTimeSec(operation),
+    }));
+  }, [operations, machineById]);
+
+  const bottleneckOperation = useMemo(() => {
+    const withCycle = operationCycleTimes.filter((entry) => entry.cycleTimeSec != null) as Array<{
+      operation: CellOperation;
+      operationLabel: string;
+      cycleTimeSec: number;
+    }>;
+    if (withCycle.length === 0) return null;
+    return withCycle.reduce((longest, entry) => (entry.cycleTimeSec > longest.cycleTimeSec ? entry : longest));
+  }, [operationCycleTimes]);
 
   const bottleneckUph = useMemo(() => {
-    const cycleTime = bottleneck?.idealCycleTime;
+    const cycleTime = bottleneckOperation?.cycleTimeSec;
     if (cycleTime == null || cycleTime <= 0) return null;
     return 3600 / cycleTime;
-  }, [bottleneck]);
+  }, [bottleneckOperation]);
 
   const cellTotalScrapCost = useMemo(
     () => cellIncidents.reduce((sum, i) => sum + i.estimatedCost, 0),
@@ -345,11 +367,11 @@ export default function CellsPage() {
                   <div className="text-xs text-muted-foreground flex items-center gap-1">
                     <AlertTriangle className="h-3 w-3" /> Bottleneck
                   </div>
-                  {bottleneck ? (
+                  {bottleneckOperation ? (
                     <>
-                      <div className="text-sm font-semibold truncate">{bottleneck.name}</div>
+                      <div className="text-sm font-semibold truncate">{bottleneckOperation.operationLabel}</div>
                       <div className="text-xs text-muted-foreground">
-                        {bottleneck.idealCycleTime != null ? `${bottleneck.idealCycleTime}s cycle` : "No cycle time set"}
+                        {`${bottleneckOperation.cycleTimeSec.toFixed(1)}s cycle`}
                       </div>
                       <div className="text-xs text-muted-foreground">
                         UPH: {bottleneckUph != null ? bottleneckUph.toLocaleString(undefined, { maximumFractionDigits: 1 }) : "-"}
@@ -379,7 +401,13 @@ export default function CellsPage() {
                 </div>
                 <div>
                   <Label>Cell Number</Label>
-                  <Input type="number" inputMode="numeric" value={status} onChange={(event) => setStatus(event.target.value)} />
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    value={status}
+                    onChange={(event) => setStatus(event.target.value)}
+                  />
                 </div>
                 <div>
                   <Label>Description</Label>
@@ -493,7 +521,7 @@ export default function CellsPage() {
                   <Save className="h-4 w-4 mr-2" />Save Cell
                 </Button>
                 {selectedCell && (
-                  <Button variant="destructive" onClick={() => deleteMutation.mutate(selectedCell.id)}>Delete Cell</Button>
+                  <Button variant="destructive" onClick={() => setDeleteConfirmOpen(true)}>Delete Cell</Button>
                 )}
               </div>
             </CardContent>
@@ -515,8 +543,11 @@ export default function CellsPage() {
                       const operationCycleTimeSec = getOperationCycleTimeSec(operation);
                       return (
                         <div key={operation.id} className="border rounded p-3 space-y-2">
-                          <div className="font-medium">
-                            {operation.name || `Operation ${index + 1}`}
+                          <div className="flex items-center gap-2">
+                            <div className="font-medium">{operation.name || `Operation ${index + 1}`}</div>
+                            {bottleneckOperation?.operation.id === operation.id && (
+                              <Badge variant="destructive" className="text-xs">Bottleneck</Badge>
+                            )}
                           </div>
                           <div className="text-xs text-muted-foreground">
                             Effective Operation Cycle Time:{" "}
@@ -552,9 +583,6 @@ export default function CellsPage() {
                                         <Clock className="h-3 w-3" />
                                         {machine.idealCycleTime != null ? `${machine.idealCycleTime}s cycle` : "No cycle time"}
                                       </span>
-                                      {machine.id === bottleneck?.id && machine.idealCycleTime != null && (
-                                        <Badge variant="destructive" className="text-xs">Bottleneck</Badge>
-                                      )}
                                     </div>
                                     {characteristics.length > 0 && (
                                       <div className="flex flex-wrap gap-1">
@@ -576,6 +604,29 @@ export default function CellsPage() {
               </CardContent>
             </Card>
           )}
+
+          <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete cell?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will permanently delete this cell configuration. This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  onClick={() => {
+                    if (!selectedCell) return;
+                    deleteMutation.mutate(selectedCell.id);
+                  }}
+                >
+                  Delete
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
 
         </div>
       </div>
