@@ -24,11 +24,6 @@ const safeText = (value: string | number | null | undefined) => {
   return String(value);
 };
 
-const truncateText = (value: string | null | undefined, max = 80) => {
-  if (!value) return "-";
-  return value.length > max ? `${value.slice(0, max - 3)}...` : value;
-};
-
 const getMachineStatusCounts = (machines: Machine[]) => {
   const counts = {
     running: 0,
@@ -49,11 +44,45 @@ const getCellOperationSummary = (cell: CellConfiguration) => {
   const operations = Array.isArray(cell.operationsJson) ? cell.operationsJson as Array<{ name?: string }> : [];
   return {
     count: operations.length,
-    names: operations
-      .map((operation) => operation?.name?.trim())
-      .filter(Boolean)
-      .join(", "),
   };
+};
+
+const getOperationCycleTimeSec = (
+  operation: { machineIds?: string[] },
+  machineById: Map<string, Machine>,
+) => {
+  const machineIds = operation.machineIds || [];
+  const cycleTimes = machineIds
+    .map((machineId) => machineById.get(machineId)?.idealCycleTime)
+    .filter((value): value is number => typeof value === "number" && value > 0);
+
+  if (cycleTimes.length === 0) return null;
+
+  const combinedRate = cycleTimes.reduce((sum, cycleTime) => sum + 1 / cycleTime, 0);
+  if (combinedRate <= 0) return null;
+
+  return 1 / combinedRate;
+};
+
+const getCellBottleneckSummary = (cell: CellConfiguration, machineById: Map<string, Machine>) => {
+  const operations = Array.isArray(cell.operationsJson)
+    ? cell.operationsJson as Array<{ name?: string; machineIds?: string[] }>
+    : [];
+
+  let bottleneckName: string | null = null;
+  let bottleneckCycleTime: number | null = null;
+
+  operations.forEach((operation, index) => {
+    const cycleTime = getOperationCycleTimeSec(operation, machineById);
+    if (cycleTime === null) return;
+    if (bottleneckCycleTime === null || cycleTime > bottleneckCycleTime) {
+      bottleneckCycleTime = cycleTime;
+      bottleneckName = operation.name?.trim() || `Operation ${index + 1}`;
+    }
+  });
+
+  if (bottleneckCycleTime === null) return "-";
+  return `${bottleneckName} (${bottleneckCycleTime.toFixed(1)}s)`;
 };
 
 export function exportDashboardStatusPdf(data: DashboardReportData) {
@@ -79,18 +108,19 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
   const cellMachineSummary = cells.map((cell) => {
     const cellMachines = machines.filter((machine) => machine.cell === cell.name);
     const operationSummary = getCellOperationSummary(cell);
+    const bottleneck = getCellBottleneckSummary(cell, machineById);
     return {
       name: cell.name,
       cellNumber: safeText(cell.status),
-      description: truncateText(cell.description, 60),
+      description: safeText(cell.description),
       operationCount: operationSummary.count,
-      operationNames: operationSummary.names || "-",
+      bottleneck,
       machineCount: cellMachines.length,
       runningCount: cellMachines.filter((machine) => machine.status === "running").length,
       downCount: cellMachines.filter((machine) => machine.status === "down").length,
       throughputUph: cell.throughputUph ?? null,
       totalWip: cell.totalWip ?? null,
-      notes: truncateText(cell.notes, 80),
+      notes: safeText(cell.notes),
     };
   });
 
@@ -159,19 +189,25 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
     tableWidth: 260,
   });
 
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(15, 23, 42);
+  doc.text("Top Scrap Incidents", 330, 282);
+
   autoTable(doc, {
-    startY: 274,
+    startY: 292,
     theme: "striped",
     styles: { fontSize: 8, cellPadding: 5, overflow: "linebreak" },
     headStyles: { fillColor: [190, 24, 93], textColor: 255 },
     margin: { left: 330, right: marginX },
-    head: [["Top Open Scrap Incidents", "Machine", "Part", "Characteristic", "Qty", "Cost"]],
+    tableWidth: "auto",
+    head: [["Rank", "Machine", "Part", "Characteristic", "Qty", "Cost"]],
     body: topOpenIncidents.length > 0
-      ? topOpenIncidents.map((incident) => {
+      ? topOpenIncidents.map((incident, index) => {
           const machine = machineById.get(incident.machineId);
           const part = incident.partId ? partById.get(incident.partId) : undefined;
           return [
-            incident.id,
+            `#${index + 1}`,
             machine?.machineId || machine?.name || incident.machineId,
             part?.partNumber || "-",
             incident.characteristic,
@@ -194,14 +230,15 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
     styles: { fontSize: 8, cellPadding: 5, overflow: "linebreak", valign: "top" },
     headStyles: { fillColor: [14, 116, 144], textColor: 255 },
     margin: { left: marginX, right: marginX },
-    head: [["Cell", "Cell Number", "Description", "Operations", "Operation Names", "Machines", "Running", "Down", "UPH", "WIP", "Notes"]],
+    tableWidth: "auto",
+    head: [["Cell", "Cell Number", "Description", "Operations", "Bottleneck", "Machines", "Running", "Down", "UPH", "WIP", "Notes"]],
     body: cellMachineSummary.length > 0
       ? cellMachineSummary.map((cell) => [
           cell.name,
           cell.cellNumber,
           cell.description,
           safeText(cell.operationCount),
-          cell.operationNames,
+          cell.bottleneck,
           safeText(cell.machineCount),
           safeText(cell.runningCount),
           safeText(cell.downCount),
@@ -224,6 +261,7 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
     styles: { fontSize: 8, cellPadding: 5, overflow: "linebreak", valign: "top" },
     headStyles: { fillColor: [22, 163, 74], textColor: 255 },
     margin: { left: marginX, right: marginX },
+    tableWidth: "auto",
     head: [["Machine ID", "Name", "Cell", "Status", "Cycle Time (s)", "Uptime %", "Batch Size", "Setup Time", "Status Note"]],
     body: machines.length > 0
       ? machines.map((machine) => [
@@ -235,7 +273,7 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
           safeText(machine.uptimePercent),
           safeText(machine.batchSize),
           safeText(machine.setupTime),
-          truncateText(machine.statusUpdate, 100),
+          safeText(machine.statusUpdate),
         ])
       : [["No machines", "-", "-", "-", "-", "-", "-", "-", "-"]],
   });
@@ -252,6 +290,7 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
     styles: { fontSize: 8, cellPadding: 5, overflow: "linebreak", valign: "top" },
     headStyles: { fillColor: [202, 138, 4], textColor: 255 },
     margin: { left: marginX, right: marginX },
+    tableWidth: "auto",
     head: [["Part Number", "Part Name", "Material", "Raw Material Cost", "Notes"]],
     body: parts.length > 0
       ? parts.map((part) => [
@@ -259,7 +298,7 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
           safeText(part.partName),
           safeText(part.material),
           part.rawMaterialCost != null ? formatCurrency(part.rawMaterialCost) : "-",
-          truncateText(part.notes, 120),
+          safeText(part.notes),
         ])
       : [["No parts", "-", "-", "-", "-"]],
   });
@@ -276,6 +315,7 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
     styles: { fontSize: 8, cellPadding: 5, overflow: "linebreak", valign: "top" },
     headStyles: { fillColor: [124, 58, 237], textColor: 255 },
     margin: { left: marginX, right: marginX },
+    tableWidth: "auto",
     head: [["Part Number", "Characteristic No.", "Name", "Nominal", "Min", "Max", "Tolerance", "Operation"]],
     body: characteristics.length > 0
       ? characteristics.map((characteristic) => [
@@ -303,6 +343,7 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
     styles: { fontSize: 7, cellPadding: 4, overflow: "linebreak", valign: "top" },
     headStyles: { fillColor: [190, 24, 93], textColor: 255 },
     margin: { left: marginX, right: marginX },
+    tableWidth: "auto",
     head: [["Status", "Machine", "Cell", "Part", "Characteristic", "Qty", "Cost", "Created", "Closed", "Note"]],
     body: scrapIncidents.length > 0
       ? scrapIncidents.map((incident) => {
@@ -318,7 +359,7 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
             formatCurrency(Number(incident.estimatedCost || 0)),
             safeText(incident.dateCreated),
             safeText(incident.dateClosed),
-            truncateText(incident.note, 110),
+            safeText(incident.note),
           ];
         })
       : [["No incidents", "-", "-", "-", "-", "-", "-", "-", "-", "-"]],
