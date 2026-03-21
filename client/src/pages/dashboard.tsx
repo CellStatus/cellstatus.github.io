@@ -1,0 +1,830 @@
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import type { HTMLAttributes } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { useLocation } from "wouter";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import { MachineCard } from "@/components/machine-card";
+import { MachineDialog, type MachineSubmitData } from "@/components/machine-dialog";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { useToast } from "@/hooks/use-toast";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import { 
+  Search,
+  Factory,
+  Bell,
+  Cog,
+  ChevronDown,
+  ChevronRight,
+} from "lucide-react";
+import type { Machine, MachineStatus, Part, ScrapIncident } from "@shared/schema";
+
+type CellConfiguration = {
+  id: string;
+  name: string;
+};
+
+type CostliestIncident = {
+  id: string;
+  machineId: string;
+  partId: string | null;
+  machineName: string;
+  cellName: string;
+  characteristic: string;
+  quantity: number;
+  incidentCost: number;
+};
+
+type CharScrapSummary = {
+  characteristic: string;
+  totalCost: number;
+  incidentCount: number;
+  totalQuantity: number;
+};
+
+type CellScrapSummary = {
+  cellName: string;
+  incidentCount: number;
+  totalCost: number;
+  totalQuantity: number;
+};
+
+type MachineScrapSummary = {
+  machineId: string;
+  machineName: string;
+  totalCost: number;
+  incidentCount: number;
+  totalQuantity: number;
+};
+
+type PartScrapSummary = {
+  partId: string | null;
+  partNumber: string;
+  totalCost: number;
+  incidentCount: number;
+  totalQuantity: number;
+};
+
+export default function Dashboard() {
+  const { toast } = useToast();
+  const [, setLocation] = useLocation();
+  const [searchQuery, setSearchQuery] = useState("");
+  const [machineDialogOpen, setMachineDialogOpen] = useState(false);
+  const [editingMachine, setEditingMachine] = useState<Machine | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deletingMachineId, setDeletingMachineId] = useState<string | null>(null);
+  const [expandedCells, setExpandedCells] = useState<Set<string>>(new Set());
+
+  // Fetch machines
+  const { data: machines = [], isLoading: machinesLoading } = useQuery<Machine[]>({
+    queryKey: ["/api/machines"],
+  });
+
+  const { data: cells = [] } = useQuery<CellConfiguration[]>({
+    queryKey: ["/api/cells"],
+    queryFn: async () => apiRequest("GET", "/api/cells"),
+  });
+
+  const goToSpcData = useCallback((params?: Record<string, string | number | undefined>) => {
+    let target = "/spc-data";
+    if (params) {
+      const search = new URLSearchParams();
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== "") {
+          search.set(key, String(value));
+        }
+      });
+      let hasEntries = false;
+      search.forEach(() => {
+        hasEntries = true;
+      });
+      if (hasEntries) {
+        target = `${target}?${search.toString()}`;
+      }
+    }
+    setLocation(target);
+  }, [setLocation]);
+
+  const clickableCardProps = useCallback(
+    (handler: () => void): HTMLAttributes<HTMLDivElement> => ({
+      onClick: handler,
+      onKeyDown: (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          handler();
+        }
+      },
+      role: "button",
+      tabIndex: 0,
+      className: "cursor-pointer transition hover:-translate-y-[1px] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
+    }),
+    []
+  );
+
+  
+
+  // Mutations
+  const createMachineMutation = useMutation({
+    mutationFn: (data: Partial<Machine>) => apiRequest("POST", "/api/machines", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/machines"] });
+      setMachineDialogOpen(false);
+      toast({ title: "Machine added successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to add machine", variant: "destructive" });
+    },
+  });
+
+  const updateMachineMutation = useMutation({
+    mutationFn: (data: Partial<Machine> & { id: string }) => 
+      apiRequest("PATCH", `/api/machines/${data.id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/machines"] });
+      toast({ title: "Machine updated" });
+    },
+    onError: () => {
+      toast({ title: "Failed to update machine", variant: "destructive" });
+    },
+  });
+
+  const updateStatusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: MachineStatus }) =>
+      apiRequest("PATCH", `/api/machines/${id}/status`, { status }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/machines"] });
+    },
+  });
+
+  const updateStatusNoteMutation = useMutation({
+    mutationFn: ({ id, statusUpdate }: { id: string; statusUpdate: string }) =>
+      apiRequest("PATCH", `/api/machines/${id}/status-update`, { statusUpdate }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/machines"] });
+      toast({ title: "Status note updated" });
+    },
+    onError: () => {
+      toast({ title: "Failed to update status note", variant: "destructive" });
+    },
+  });
+
+  const deleteMachineMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/machines/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/machines"] });
+      setDeleteConfirmOpen(false);
+      setDeletingMachineId(null);
+      toast({ title: "Machine deleted" });
+    },
+    onError: () => {
+      toast({ title: "Failed to delete machine", variant: "destructive" });
+    },
+  });
+
+  // Filter machines
+  const filteredMachines = machines.filter(machine => {
+    if (!searchQuery) return true;
+    const query = searchQuery.toLowerCase();
+    return (
+      machine.name.toLowerCase().includes(query) ||
+      machine.machineId.toLowerCase().includes(query) ||
+      (machine.cell && machine.cell.toLowerCase().includes(query))
+    );
+  });
+
+  // Group machines by cell
+  const machinesByCell = useMemo(() => {
+    const grouped: Record<string, Machine[]> = {};
+    filteredMachines.forEach(machine => {
+      const cellName = machine.cell || "Unassigned";
+      if (!grouped[cellName]) {
+        grouped[cellName] = [];
+      }
+      grouped[cellName].push(machine);
+    });
+    // Sort cells alphabetically, but put "Unassigned" at the end
+    const sortedKeys = Object.keys(grouped).sort((a, b) => {
+      if (a === "Unassigned") return 1;
+      if (b === "Unassigned") return -1;
+      return a.localeCompare(b);
+    });
+    return { grouped, sortedKeys };
+  }, [filteredMachines]);
+
+  // Fetch scrap incidents and group by machine
+  const { data: scrapIncidents = [] } = useQuery<ScrapIncident[]>({
+    queryKey: ['/api/scrap-incidents'],
+    queryFn: async () => apiRequest('GET', '/api/scrap-incidents'),
+  });
+
+  const { data: parts = [] } = useQuery<Part[]>({
+    queryKey: ['/api/parts'],
+    queryFn: async () => apiRequest('GET', '/api/parts'),
+  });
+
+  // Only show open incidents on the dashboard
+  const openIncidents = useMemo(() => {
+    return (scrapIncidents || []).filter((incident) => incident.status !== 'closed');
+  }, [scrapIncidents]);
+
+  const incidentsByMachine = useMemo(() => {
+    const map: Record<string, ScrapIncident[]> = {};
+    (openIncidents || []).forEach((incident) => {
+      if (!map[incident.machineId]) map[incident.machineId] = [];
+      map[incident.machineId].push(incident);
+    });
+    return map;
+  }, [openIncidents]);
+
+  const incidentsWithCost = useMemo<CostliestIncident[]>(() => {
+    return (openIncidents || [])
+      .map((incident) => {
+        const machine = machines.find((item) => item.id === incident.machineId);
+        return {
+          id: incident.id,
+          machineId: incident.machineId,
+          partId: incident.partId,
+          machineName: machine?.name || incident.machineId || "Unknown Machine",
+          cellName: machine?.cell || "Unassigned",
+          characteristic: incident.characteristic || "(unknown)",
+          quantity: incident.quantity,
+          incidentCost: Number(incident.estimatedCost || 0),
+        };
+      })
+      .filter((incident) => incident.incidentCost >= 0);
+  }, [machines, openIncidents]);
+
+  const costliestIncidents = useMemo<CostliestIncident[]>(() => {
+    return [...incidentsWithCost]
+      .filter((incident) => incident.incidentCost > 0)
+      .sort((left, right) => right.incidentCost - left.incidentCost)
+      .slice(0, 5);
+  }, [incidentsWithCost]);
+
+  const cellScrapSummary = useMemo<CellScrapSummary[]>(() => {
+    const map = new Map<string, CellScrapSummary>();
+    incidentsWithCost.forEach((incident) => {
+      const existing = map.get(incident.cellName);
+      if (existing) {
+        existing.incidentCount += 1;
+        existing.totalCost += incident.incidentCost;
+        existing.totalQuantity += incident.quantity;
+      } else {
+        map.set(incident.cellName, {
+          cellName: incident.cellName,
+          incidentCount: 1,
+          totalCost: incident.incidentCost,
+          totalQuantity: incident.quantity,
+        });
+      }
+    });
+    return Array.from(map.values()).sort((left, right) => right.totalCost - left.totalCost);
+  }, [incidentsWithCost]);
+
+  const machineScrapSummary = useMemo<MachineScrapSummary[]>(() => {
+    const map = new Map<string, MachineScrapSummary>();
+    incidentsWithCost.forEach((incident) => {
+      const existing = map.get(incident.machineId);
+      if (existing) {
+        existing.totalCost += incident.incidentCost;
+        existing.incidentCount += 1;
+        existing.totalQuantity += incident.quantity;
+      } else {
+        map.set(incident.machineId, {
+          machineId: incident.machineId,
+          machineName: incident.machineName,
+          totalCost: incident.incidentCost,
+          incidentCount: 1,
+          totalQuantity: incident.quantity,
+        });
+      }
+    });
+    return Array.from(map.values()).sort((left, right) => right.totalCost - left.totalCost);
+  }, [incidentsWithCost]);
+
+  const highestScrapMachine = machineScrapSummary[0];
+  const highestScrapCell = cellScrapSummary[0];
+
+  const partById = useMemo(() => {
+    const map = new Map<string, Part>();
+    (parts || []).forEach((part) => map.set(part.id, part));
+    return map;
+  }, [parts]);
+
+  const charScrapSummary = useMemo<CharScrapSummary[]>(() => {
+    const map = new Map<string, CharScrapSummary>();
+    incidentsWithCost.forEach((incident) => {
+      const key = incident.characteristic;
+      const existing = map.get(key);
+      if (existing) {
+        existing.totalCost += incident.incidentCost;
+        existing.incidentCount += 1;
+        existing.totalQuantity += incident.quantity;
+      } else {
+        map.set(key, { characteristic: key, totalCost: incident.incidentCost, incidentCount: 1, totalQuantity: incident.quantity });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => b.totalCost - a.totalCost);
+  }, [incidentsWithCost]);
+
+  const partScrapSummary = useMemo<PartScrapSummary[]>(() => {
+    const map = new Map<string, PartScrapSummary>();
+    incidentsWithCost.forEach((incident) => {
+      const partId = incident.partId;
+      const key = partId || "unassigned";
+      const partNumber = partId ? (partById.get(partId)?.partNumber || "Unknown Part") : "Unassigned";
+      const existing = map.get(key);
+      if (existing) {
+        existing.totalCost += incident.incidentCost;
+        existing.incidentCount += 1;
+        existing.totalQuantity += incident.quantity;
+      } else {
+        map.set(key, {
+          partId,
+          partNumber,
+          totalCost: incident.incidentCost,
+          incidentCount: 1,
+          totalQuantity: incident.quantity,
+        });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => b.totalCost - a.totalCost);
+  }, [incidentsWithCost, partById]);
+
+  const totalScrapCost = useMemo(() => {
+    return costliestIncidents.reduce((sum, incident) => sum + incident.incidentCost, 0);
+  }, [costliestIncidents]);
+
+  const cellMetrics = useMemo(() => {
+    const configuredCells = cells.length;
+    return { configuredCells };
+  }, [cells]);
+
+  const toggleCell = (cellName: string) => {
+    setExpandedCells(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(cellName)) {
+        newSet.delete(cellName);
+      } else {
+        newSet.add(cellName);
+      }
+      return newSet;
+    });
+  };
+
+  const handleStatusChange = (machineId: string, status: MachineStatus) => {
+    updateStatusMutation.mutate({ id: machineId, status });
+  };
+
+  const handleStatusNoteChange = (machineId: string, statusUpdate: string) => {
+    updateStatusNoteMutation.mutate({ id: machineId, statusUpdate });
+  };
+
+  const handleDeleteMachine = (machineId: string) => {
+    setDeletingMachineId(machineId);
+    setDeleteConfirmOpen(true);
+  };
+
+  // Calculate summary stats
+  const runningMachines = machines.filter(m => m.status === "running").length;
+  const machinesWithCycleTime = machines.filter(m => m.idealCycleTime && m.idealCycleTime > 0).length;
+
+  return (
+    <div className="flex flex-col h-full overflow-auto">
+      {/* Header */}
+      <div className="border-b bg-card/50 px-6 py-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Factory className="h-10 w-10 text-primary" />
+            <div>
+              <h1 className="text-2xl font-bold">
+                CellStatus Operations Hub
+              </h1>
+              <p className="text-sm text-muted-foreground mt-1">
+                Manage machines, configure production cells, and monitor scrap performance
+              </p>
+            </div>
+          </div>
+          
+        </div>
+      </div>
+
+      <div className="flex-1 p-6 space-y-6">
+        {/* Summary Cards */}
+        <div className="grid gap-4 grid-cols-1 md:grid-cols-5">
+          <Card {...clickableCardProps(() => goToSpcData())}>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Costliest Scrap Incidents
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {costliestIncidents.length === 0 ? (
+                <div className="text-sm text-muted-foreground">No incident cost data found</div>
+              ) : (
+                <div className="space-y-1.5">
+                  {costliestIncidents.slice(0, 3).map((incident) => (
+                    <button
+                      key={incident.id}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setLocation(`/spc-data?machineId=${encodeURIComponent(incident.machineId)}&char=${encodeURIComponent(incident.characteristic)}`);
+                      }}
+                      className="w-full flex items-center justify-between text-left"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-sm truncate">{incident.machineName}</div>
+                        <div className="text-xs text-muted-foreground truncate">{incident.characteristic}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-bold text-lg">${incident.incidentCost.toLocaleString()}</div>
+                          <div className="text-xs text-muted-foreground">{incident.quantity} pc{incident.quantity !== 1 ? "s" : ""} scrapped</div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+          <Card {...clickableCardProps(() => goToSpcData())}>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Cost in Top Incidents
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-rose-600">${totalScrapCost.toLocaleString()}</div>
+              <p className="text-xs text-muted-foreground">
+                across top {costliestIncidents.length} costliest incidents
+              </p>
+              {costliestIncidents.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {costliestIncidents.slice(0, 2).map((incident) => (
+                    <div key={`${incident.id}-summary`} className="text-xs text-muted-foreground truncate">
+                      {incident.characteristic}: ${incident.incidentCost.toLocaleString()}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+          <Card {...clickableCardProps(() => setLocation('/cells'))}>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">Configured Cells</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-sky-600">{cellMetrics.configuredCells}</div>
+            </CardContent>
+          </Card>
+          <Card {...clickableCardProps(() => highestScrapMachine && setLocation(`/spc-data?machineId=${encodeURIComponent(highestScrapMachine.machineId)}`))}>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">Highest Scrap Machine</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {highestScrapMachine ? (
+                <>
+                  <div className="text-base font-semibold truncate">{highestScrapMachine.machineName}</div>
+                  <div className="text-2xl font-bold text-rose-600">${highestScrapMachine.totalCost.toLocaleString()}</div>
+                  <p className="text-xs text-muted-foreground">{highestScrapMachine.incidentCount} incidents</p>
+                </>
+              ) : (
+                <div className="text-sm text-muted-foreground">No incident data</div>
+              )}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">Highest Scrap Cell</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {highestScrapCell ? (
+                <>
+                  <div className="text-base font-semibold truncate">{highestScrapCell.cellName}</div>
+                  <div className="text-2xl font-bold text-rose-600">${highestScrapCell.totalCost.toLocaleString()}</div>
+                  <p className="text-xs text-muted-foreground">{highestScrapCell.incidentCount} incidents</p>
+                </>
+              ) : (
+                <div className="text-sm text-muted-foreground">No incident data</div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Scrap Incidents by Cell */}
+        <div>
+          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <Factory className="h-5 w-5" />
+            Scrap Incidents by Cell
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {cellScrapSummary.length === 0 ? (
+              <Card>
+                <CardContent>
+                  <div className="text-sm text-muted-foreground">No open scrap incidents by cell</div>
+                </CardContent>
+              </Card>
+            ) : (
+              cellScrapSummary.map((cell) => (
+                <Card key={cell.cellName}>
+                  <CardHeader>
+                    <CardTitle className="text-sm font-medium">{cell.cellName}</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-xs text-muted-foreground">Incidents</div>
+                        <div className="text-2xl font-bold">{cell.incidentCount}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-xs text-muted-foreground">Scrap Cost</div>
+                        <div className="text-2xl font-bold text-rose-600">${cell.totalCost.toLocaleString()}</div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Scrap Cost Leaderboard */}
+        <div>
+          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <Bell className="h-5 w-5" />
+            Scrap Cost Leaderboard
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm font-medium">Scrap by Machine</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {machineScrapSummary.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No machine scrap data available</div>
+                ) : (
+                  <div className="space-y-2">
+                    {machineScrapSummary.slice(0, 5).map((machine, idx) => (
+                      <div
+                        key={machine.machineId}
+                        className="flex items-center justify-between"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-xs text-muted-foreground">#{idx + 1}</div>
+                          <div className="text-sm truncate">{machine.machineName}</div>
+                          <div className="text-xs text-muted-foreground">{machine.totalQuantity} pc{machine.totalQuantity !== 1 ? "s" : ""} scrapped</div>
+                        </div>
+                        <div className="font-semibold text-rose-600">${machine.totalCost.toLocaleString()}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm font-medium">Scrap by Cell</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {cellScrapSummary.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No cell scrap data available</div>
+                ) : (
+                  <div className="space-y-2">
+                    {cellScrapSummary.slice(0, 5).map((cell, idx) => (
+                      <div key={cell.cellName} className="flex items-center justify-between">
+                        <div className="min-w-0">
+                          <div className="text-xs text-muted-foreground">#{idx + 1}</div>
+                          <div className="text-sm truncate">{cell.cellName}</div>
+                          <div className="text-xs text-muted-foreground">{cell.totalQuantity} pc{cell.totalQuantity !== 1 ? "s" : ""} scrapped</div>
+                        </div>
+                        <div className="font-semibold text-rose-600">${cell.totalCost.toLocaleString()}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm font-medium">Scrap by Characteristic</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {charScrapSummary.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No characteristic scrap data available</div>
+                ) : (
+                  <div className="space-y-2">
+                    {charScrapSummary.slice(0, 5).map((char, idx) => (
+                      <div key={char.characteristic} className="flex items-center justify-between">
+                        <div className="min-w-0">
+                          <div className="text-xs text-muted-foreground">#{idx + 1}</div>
+                          <div className="text-sm truncate">{char.characteristic}</div>
+                          <div className="text-xs text-muted-foreground">{char.totalQuantity} pc{char.totalQuantity !== 1 ? "s" : ""} scrapped</div>
+                        </div>
+                        <div className="font-semibold text-rose-600">${char.totalCost.toLocaleString()}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm font-medium">Scrap by Part Number</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {partScrapSummary.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No part scrap data available</div>
+                ) : (
+                  <div className="space-y-2">
+                    {partScrapSummary.slice(0, 5).map((part, idx) => (
+                      <div key={`${part.partId || "unassigned"}-${idx}`} className="flex items-center justify-between">
+                        <div className="min-w-0">
+                          <div className="text-xs text-muted-foreground">#{idx + 1}</div>
+                          <div className="text-sm truncate">{part.partNumber}</div>
+                          <div className="text-xs text-muted-foreground">{part.totalQuantity} pc{part.totalQuantity !== 1 ? "s" : ""} scrapped</div>
+                        </div>
+                        <div className="font-semibold text-rose-600">${part.totalCost.toLocaleString()}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
+        {/* Machines Section */}
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold flex items-center gap-2">
+              <Cog className="h-5 w-5" />
+              Machines
+            </h2>
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  type="text"
+                  placeholder="Search machines or cells..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9 w-64"
+                />
+              </div>
+            </div>
+          </div>
+
+          {machinesLoading ? (
+            <div className="space-y-4">
+              {[1, 2].map((i) => (
+                <Card key={i}>
+                  <CardHeader>
+                    <Skeleton className="h-6 w-48" />
+                  </CardHeader>
+                  <CardContent>
+                    <Skeleton className="h-24 w-full" />
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : filteredMachines.length === 0 ? (
+            <div className="text-center py-12">
+              <Cog className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
+              <h3 className="text-lg font-semibold mb-2">
+                {searchQuery ? "No machines found" : "No machines yet"}
+              </h3>
+              <p className="text-muted-foreground mb-4">
+                {searchQuery 
+                  ? "Try a different search term" 
+                  : "Add machines from the Machines page to get started"}
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {machinesByCell.sortedKeys.map((cellName) => {
+                const cellMachines = machinesByCell.grouped[cellName];
+                const isExpanded = expandedCells.has(cellName);
+                const runningCount = cellMachines.filter(m => m.status === "running").length;
+                const downCount = cellMachines.filter(m => m.status === "down").length;
+                
+                return (
+                  <Collapsible key={cellName} open={isExpanded} onOpenChange={() => toggleCell(cellName)}>
+                    <Card className="overflow-hidden">
+                      <CollapsibleTrigger asChild>
+                        <CardHeader className="cursor-pointer hover:bg-muted/50 transition-colors py-3">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              {isExpanded ? (
+                                <ChevronDown className="h-5 w-5 text-muted-foreground" />
+                              ) : (
+                                <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                              )}
+                              <CardTitle className="text-lg flex items-center gap-2">
+                                {cellName === "Unassigned" ? (
+                                  <span className="text-muted-foreground italic">{cellName}</span>
+                                ) : (
+                                  cellName
+                                )}
+                              </CardTitle>
+                              <Badge variant="secondary" className="ml-2">
+                                {cellMachines.length} machine{cellMachines.length !== 1 ? 's' : ''}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {runningCount > 0 && (
+                                <Badge variant="default" className="bg-green-500 hover:bg-green-600">
+                                  {runningCount} running
+                                </Badge>
+                              )}
+                              {downCount > 0 && (
+                                <Badge variant="destructive">
+                                  {downCount} down
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                        </CardHeader>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <CardContent className="pt-0 pb-4">
+                          <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                            {cellMachines.map((machine) => (
+                              <MachineCard
+                                key={machine.id}
+                                machine={machine}
+                                onStatusChange={handleStatusChange}
+                                onUpdateMachine={(data: { id: string } & Partial<Machine>) => updateMachineMutation.mutate(data)}
+                                onStatusNoteChange={handleStatusNoteChange}
+                                onDeleteMachine={handleDeleteMachine}
+                                onOpenScrapIncidents={(machineId) => setLocation(`/spc-data?machineId=${encodeURIComponent(machineId)}`)}
+                                isPending={updateMachineMutation.isPending || updateStatusNoteMutation.isPending}
+                                scrapIncidentsCount={(incidentsByMachine[machine.id] || []).length}
+                              />
+                            ))}
+                          </div>
+                        </CardContent>
+                      </CollapsibleContent>
+                    </Card>
+                  </Collapsible>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Machine Dialog */}
+      <MachineDialog
+        open={machineDialogOpen}
+        onOpenChange={setMachineDialogOpen}
+        machine={editingMachine}
+        onSubmit={(data: MachineSubmitData) => {
+          if (editingMachine) {
+            updateMachineMutation.mutate({ id: editingMachine.id, ...data });
+          } else {
+            createMachineMutation.mutate(data);
+          }
+        }}
+        isPending={createMachineMutation.isPending || updateMachineMutation.isPending}
+      />
+
+      {/* Delete Confirmation */}
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Machine?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete the machine
+              and remove it from active cell workflows.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deletingMachineId && deleteMachineMutation.mutate(deletingMachineId)}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}

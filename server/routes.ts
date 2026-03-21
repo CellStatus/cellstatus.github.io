@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
-import { insertMachineSchema, insertVsmConfigurationSchema, machineStatuses, insertPartSchema, insertCharacteristicSchema, insertSpcMeasurementSchema } from "@shared/schema";
+import { insertMachineSchema, insertCellConfigurationSchema, machineStatuses, insertPartSchema, insertCharacteristicSchema, insertSpcMeasurementSchema, insertScrapIncidentSchema } from "@shared/schema";
 import { z } from "zod";
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
@@ -116,6 +116,68 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (error) {
       console.error("Error deleting machine:", error);
       res.status(500).json({ message: "Failed to delete machine" });
+    }
+  });
+
+  // ============ SCRAP INCIDENTS ROUTES ============
+
+  app.get('/api/scrap-incidents', async (_req, res) => {
+    try {
+      const incidents = await storage.getScrapIncidents();
+      res.json(incidents);
+    } catch (err) {
+      console.error('Error fetching scrap incidents', err);
+      res.status(500).json({ message: 'Failed to fetch scrap incidents' });
+    }
+  });
+
+  app.get('/api/machines/:id/scrap-incidents', async (req, res) => {
+    try {
+      const incidents = await storage.getScrapIncidentsByMachine(req.params.id);
+      res.json(incidents);
+    } catch (err) {
+      console.error('Error fetching machine scrap incidents', err);
+      res.status(500).json({ message: 'Failed to fetch machine scrap incidents' });
+    }
+  });
+
+  app.post('/api/scrap-incidents', async (req, res) => {
+    try {
+      const validated = insertScrapIncidentSchema.parse(req.body);
+      const incident = await storage.createScrapIncident(validated);
+      res.status(201).json(incident);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Invalid scrap incident data', details: err.errors });
+      }
+      console.error('Error creating scrap incident', err);
+      res.status(500).json({ message: 'Failed to create scrap incident' });
+    }
+  });
+
+  app.patch('/api/scrap-incidents/:id', async (req, res) => {
+    try {
+      const partial = insertScrapIncidentSchema.partial().parse(req.body);
+      const updated = await storage.updateScrapIncident(req.params.id, partial);
+      if (!updated) return res.status(404).json({ message: 'Scrap incident not found' });
+      res.json(updated);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Invalid scrap incident data', details: err.errors });
+      }
+      console.error('Error updating scrap incident', err);
+      res.status(500).json({ message: 'Failed to update scrap incident' });
+    }
+  });
+
+  app.delete('/api/scrap-incidents/:id', async (req, res) => {
+    try {
+      const success = await storage.deleteScrapIncident(req.params.id);
+      if (!success) return res.status(404).json({ message: 'Scrap incident not found' });
+      res.json({ success: true });
+    } catch (err) {
+      console.error('Error deleting scrap incident', err);
+      res.status(500).json({ message: 'Failed to delete scrap incident' });
     }
   });
 
@@ -360,68 +422,68 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  // ============ VSM CONFIGURATIONS ROUTES ============
+  // ============ CELL CONFIGURATIONS ROUTES ============
 
-  app.get("/api/vsm-configurations", async (_req, res) => {
+  app.get("/api/cells", async (_req, res) => {
     try {
-      const configurations = await storage.getVsmConfigurations();
+      const configurations = await storage.getCellConfigurations();
       res.json(configurations);
     } catch (error) {
-      console.error("Error fetching VSM configurations:", error);
-      res.status(500).json({ message: "Failed to fetch VSM configurations" });
+      console.error("Error fetching cell configurations:", error);
+      res.status(500).json({ message: "Failed to fetch cell configurations" });
     }
   });
 
-  app.get("/api/vsm-configurations/:id", async (req, res) => {
+  app.get("/api/cells/:id", async (req, res) => {
     try {
-      const configuration = await storage.getVsmConfiguration(req.params.id);
+      const configuration = await storage.getCellConfiguration(req.params.id);
       if (!configuration) {
-        return res.status(404).json({ message: "VSM configuration not found" });
+        return res.status(404).json({ message: "Cell configuration not found" });
       }
       res.json(configuration);
     } catch (error) {
-      console.error("Error fetching VSM configuration:", error);
-      res.status(500).json({ message: "Failed to fetch VSM configuration" });
+      console.error("Error fetching cell configuration:", error);
+      res.status(500).json({ message: "Failed to fetch cell configuration" });
     }
   });
 
-  app.post("/api/vsm-configurations", async (req, res) => {
+  app.post("/api/cells", async (req, res) => {
     try {
-      const validated = insertVsmConfigurationSchema.parse(req.body);
-      const configuration = await storage.createVsmConfiguration(validated);
+      const validated = insertCellConfigurationSchema.parse(req.body);
+      const configuration = await storage.createCellConfiguration(validated);
       res.status(201).json(configuration);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: "Invalid VSM configuration data", details: error.errors });
+        return res.status(400).json({ error: "Invalid cell configuration data", details: error.errors });
       }
-      console.error("Error creating VSM configuration:", error);
-      res.status(500).json({ message: "Failed to create VSM configuration" });
+      console.error("Error creating cell configuration:", error);
+      res.status(500).json({ message: "Failed to create cell configuration" });
     }
   });
 
-  app.put("/api/vsm-configurations/:id", async (req, res) => {
+  app.put("/api/cells/:id", async (req, res) => {
     try {
-      const configuration = await storage.updateVsmConfiguration(req.params.id, req.body);
+      const configuration = await storage.updateCellConfiguration(req.params.id, req.body);
       if (!configuration) {
-        return res.status(404).json({ message: "VSM configuration not found" });
+        return res.status(404).json({ message: "Cell configuration not found" });
       }
       res.json(configuration);
     } catch (error) {
-      console.error("Error updating VSM configuration:", error);
-      res.status(500).json({ message: "Failed to update VSM configuration" });
+      console.error("Error updating cell configuration:", error);
+      res.status(500).json({ message: "Failed to update cell configuration" });
     }
   });
 
-  app.delete("/api/vsm-configurations/:id", async (req, res) => {
+  app.delete("/api/cells/:id", async (req, res) => {
     try {
-      const success = await storage.deleteVsmConfiguration(req.params.id);
+      const success = await storage.deleteCellConfiguration(req.params.id);
       if (!success) {
-        return res.status(404).json({ message: "VSM configuration not found" });
+        return res.status(404).json({ message: "Cell configuration not found" });
       }
       res.json({ success: true });
     } catch (error) {
-      console.error("Error deleting VSM configuration:", error);
-      res.status(500).json({ message: "Failed to delete VSM configuration" });
+      console.error("Error deleting cell configuration:", error);
+      res.status(500).json({ message: "Failed to delete cell configuration" });
     }
   });
 

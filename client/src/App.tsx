@@ -7,11 +7,12 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
-import Dashboard from "@/pages/dashboard-vsm";
+import Dashboard from "@/pages/dashboard";
 import Machines from "@/pages/machines";
-import VSMBuilder from "@/pages/vsm-builder";
-import SimpleVSM from "@/pages/simple-vsm";
+import CellsPage from "@/pages/cells";
 import SpcData from "@/pages/spc-data";
+import PartsPage from "@/pages/parts";
+import CharacteristicsPage from "@/pages/characteristics";
 import NotFound from "@/pages/not-found";
 
 
@@ -66,8 +67,9 @@ function AppContent() {
             <Switch>
               <Route path="/" component={Dashboard} />
               <Route path="/machines" component={Machines} />
-              <Route path="/vsm-builder" component={VSMBuilder} />
-              <Route path="/simple-vsm" component={SimpleVSM} />
+              <Route path="/cells" component={CellsPage} />
+              <Route path="/parts" component={PartsPage} />
+              <Route path="/characteristics" component={CharacteristicsPage} />
               <Route path="/spc-data" component={SpcData} />
               <Route component={NotFound} />
             </Switch>

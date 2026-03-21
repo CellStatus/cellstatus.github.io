@@ -1,7 +1,11 @@
 import { Pool } from '@neondatabase/serverless';
 
+if (!process.env.DATABASE_URL) {
+  throw new Error('DATABASE_URL must be set to test the Neon connection.');
+}
+
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgresql://neondb_owner:npg_HkhYmQ3jP2Mu@ep-lively-brook-a8rctex0-pooler.eastus2.azure.neon.tech/neondb?sslmode=require&channel_binding=require',
+  connectionString: process.env.DATABASE_URL,
 });
 
 async function testConnection() {

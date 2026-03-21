@@ -15,7 +15,7 @@ export const machines = pgTable("machines", {
   machineId: text("machine_id").notNull(),
   status: text("status").notNull().$type<MachineStatus>(),
   cell: text("cell"), // Cell/area the machine belongs to
-  // VSM fields
+  // Cell flow fields
   idealCycleTime: real("ideal_cycle_time"), // cycle time in seconds
   batchSize: integer("batch_size"), // pcs per setup
   uptimePercent: real("uptime_percent"), // reliability percentage (0-100)
@@ -47,29 +47,54 @@ export const downtimeReasonCodes: Record<string, { category: typeof downtimeCate
   OTH_01: { category: 'other', label: 'Other' },
 };
 
-// === VALUE STREAM MAPPING ===
+// === CELL CONFIGURATIONS ===
 
-// VSM configurations table - stores value stream maps
-export const vsmConfigurations = pgTable("vsm_configurations", {
+export const cellConfigurations = pgTable("cell_configurations", {
   id: varchar("id").primaryKey(),
   name: text("name").notNull(),
   description: text("description"),
-  status: text("status").default("active"), // Cell status: active, idle, down, etc.
-  stationsJson: jsonb("stations_json").notNull(), // Array of VSM stations with machine links
-  bottleneckRate: real("bottleneck_rate"), // System throughput in units/sec
-  processEfficiency: real("process_efficiency"), // Overall efficiency percentage
+  status: text("status").default("active"),
+  operationsJson: jsonb("operations_json").notNull(),
+  throughputUph: real("throughput_uph"),
+  totalWip: real("total_wip"),
   notes: text("notes"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
 
-export const insertVsmConfigurationSchema = createInsertSchema(vsmConfigurations).omit({ 
+export const insertCellConfigurationSchema = createInsertSchema(cellConfigurations).omit({ 
   id: true, 
   createdAt: true, 
   updatedAt: true,
 });
-export type InsertVsmConfiguration = z.infer<typeof insertVsmConfigurationSchema>;
-export type VsmConfiguration = typeof vsmConfigurations.$inferSelect;
+export type InsertCellConfiguration = z.infer<typeof insertCellConfigurationSchema>;
+export type CellConfiguration = typeof cellConfigurations.$inferSelect;
+
+// === SCRAP INCIDENTS ===
+
+export const scrapIncidentStatuses = ["open", "closed"] as const;
+export type ScrapIncidentStatus = typeof scrapIncidentStatuses[number];
+
+export const scrapIncidents = pgTable("scrap_incidents", {
+  id: varchar("id").primaryKey(),
+  machineId: varchar("machine_id").notNull(),
+  partId: varchar("part_id"),
+  characteristic: text("characteristic").notNull(),
+  quantity: integer("quantity").notNull(),
+  estimatedCost: real("estimated_cost").notNull(),
+  note: text("note"),
+  status: text("status").notNull().$type<ScrapIncidentStatus>().default("open"),
+  dateCreated: text("date_created"),
+  dateClosed: text("date_closed"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const insertScrapIncidentSchema = createInsertSchema(scrapIncidents)
+  .omit({ id: true, createdAt: true, updatedAt: true })
+  .extend({ partId: z.string().nullable().optional() });
+export type InsertScrapIncident = z.infer<typeof insertScrapIncidentSchema>;
+export type ScrapIncident = typeof scrapIncidents.$inferSelect;
 
 // === SPC DATA (3NF) ===
 
@@ -78,6 +103,9 @@ export const parts = pgTable("parts", {
   id: varchar("id").primaryKey(),
   partNumber: text("part_number").notNull(),
   partName: text("part_name"),
+  material: text("material"),
+  rawMaterialCost: real("raw_material_cost"),
+  notes: text("notes"),
   createdAt: text("created_at").notNull(),
 });
 
@@ -88,9 +116,10 @@ export type Part = typeof parts.$inferSelect;
 // Characteristics table – one row per unique characteristic within a part
 export const characteristics = pgTable("characteristics", {
   id: varchar("id").primaryKey(),
-  partId: varchar("part_id").notNull(),  // FK → parts.id
+  partId: varchar("part_id"),  // FK → parts.id (optional)
   charNumber: text("char_number").notNull(),
   charName: text("char_name"),
+  nominalValue: text("nominal_value"),
   charMax: text("char_max"),
   charMin: text("char_min"),
   tolerance: text("tolerance"),
@@ -98,7 +127,9 @@ export const characteristics = pgTable("characteristics", {
   createdAt: text("created_at").notNull(),
 });
 
-export const insertCharacteristicSchema = createInsertSchema(characteristics).omit({ id: true, createdAt: true });
+export const insertCharacteristicSchema = createInsertSchema(characteristics)
+  .omit({ id: true, createdAt: true })
+  .extend({ partId: z.string().nullable().optional() });
 export type InsertCharacteristic = z.infer<typeof insertCharacteristicSchema>;
 export type Characteristic = typeof characteristics.$inferSelect;
 
@@ -122,11 +153,12 @@ export interface SpcRecordFlat {
   id: string;
   machineId: string;
   characteristicId: string;
-  partId: string;
+  partId: string | null;
   partNumber: string;
   partName: string | null;
   charNumber: string;
   charName: string | null;
+  nominalValue: string | null;
   charMax: string | null;
   charMin: string | null;
   tolerance: string | null;
@@ -145,6 +177,7 @@ export type InsertSpcRecord = InsertSpcMeasurement & {
   partName?: string;
   charNumber?: string;
   charName?: string;
+  nominalValue?: string;
   charMax?: string;
   charMin?: string;
   tolerance?: string;

@@ -1,12 +1,14 @@
 import { 
   type Machine, type InsertMachine,
   type MachineStatus,
-  type VsmConfiguration, type InsertVsmConfiguration,
+  type CellConfiguration, type InsertCellConfiguration,
+  type ScrapIncident, type InsertScrapIncident,
   type Part, type InsertPart,
   type Characteristic, type InsertCharacteristic,
   type SpcMeasurement, type InsertSpcMeasurement,
   type SpcRecordFlat,
-  machines, vsmConfigurations,
+  machines, cellConfigurations,
+  scrapIncidents,
   parts, characteristics, spcMeasurements,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
@@ -23,12 +25,19 @@ export interface IStorage {
   updateMachineStatusUpdate(id: string, statusUpdate: string): Promise<Machine | undefined>;
   deleteMachine(id: string): Promise<boolean>;
 
-  // VSM Configurations
-  getVsmConfigurations(): Promise<VsmConfiguration[]>;
-  getVsmConfiguration(id: string): Promise<VsmConfiguration | undefined>;
-  createVsmConfiguration(config: InsertVsmConfiguration): Promise<VsmConfiguration>;
-  updateVsmConfiguration(id: string, updates: Partial<InsertVsmConfiguration>): Promise<VsmConfiguration | undefined>;
-  deleteVsmConfiguration(id: string): Promise<boolean>;
+  // Cell Configurations
+  getCellConfigurations(): Promise<CellConfiguration[]>;
+  getCellConfiguration(id: string): Promise<CellConfiguration | undefined>;
+  createCellConfiguration(config: InsertCellConfiguration): Promise<CellConfiguration>;
+  updateCellConfiguration(id: string, updates: Partial<InsertCellConfiguration>): Promise<CellConfiguration | undefined>;
+  deleteCellConfiguration(id: string): Promise<boolean>;
+
+  // Scrap Incidents
+  getScrapIncidents(): Promise<ScrapIncident[]>;
+  getScrapIncidentsByMachine(machineId: string): Promise<ScrapIncident[]>;
+  createScrapIncident(incident: InsertScrapIncident): Promise<ScrapIncident>;
+  updateScrapIncident(id: string, updates: Partial<InsertScrapIncident>): Promise<ScrapIncident | undefined>;
+  deleteScrapIncident(id: string): Promise<boolean>;
 
   // Parts
   getParts(): Promise<Part[]>;
@@ -192,42 +201,95 @@ export class DatabaseStorage implements IStorage {
     return true;
   }
 
-  // VSM Configuration operations
-  async getVsmConfigurations(): Promise<VsmConfiguration[]> {
-    return await db.select().from(vsmConfigurations).orderBy(vsmConfigurations.updatedAt);
+  // Cell Configuration operations
+  async getCellConfigurations(): Promise<CellConfiguration[]> {
+    return await db.select().from(cellConfigurations).orderBy(cellConfigurations.updatedAt);
   }
 
-  async getVsmConfiguration(id: string): Promise<VsmConfiguration | undefined> {
-    const result = await db.select().from(vsmConfigurations).where(eq(vsmConfigurations.id, id)).limit(1);
+  async getCellConfiguration(id: string): Promise<CellConfiguration | undefined> {
+    const result = await db.select().from(cellConfigurations).where(eq(cellConfigurations.id, id)).limit(1);
     return result[0];
   }
 
-  async createVsmConfiguration(config: InsertVsmConfiguration): Promise<VsmConfiguration> {
+  async createCellConfiguration(config: InsertCellConfiguration): Promise<CellConfiguration> {
     const id = randomUUID();
     const now = new Date().toISOString();
-    await db.insert(vsmConfigurations).values({
+    await db.insert(cellConfigurations).values({
       id,
       ...config,
       createdAt: now,
       updatedAt: now,
     });
-    const result = await db.select().from(vsmConfigurations).where(eq(vsmConfigurations.id, id)).limit(1);
+    const result = await db.select().from(cellConfigurations).where(eq(cellConfigurations.id, id)).limit(1);
     return result[0]!;
   }
 
-  async updateVsmConfiguration(id: string, updates: Partial<InsertVsmConfiguration>): Promise<VsmConfiguration | undefined> {
+  async updateCellConfiguration(id: string, updates: Partial<InsertCellConfiguration>): Promise<CellConfiguration | undefined> {
     const now = new Date().toISOString();
-    await db.update(vsmConfigurations).set({
+    await db.update(cellConfigurations).set({
       ...updates,
       updatedAt: now,
-    }).where(eq(vsmConfigurations.id, id));
-    const result = await db.select().from(vsmConfigurations).where(eq(vsmConfigurations.id, id)).limit(1);
+    }).where(eq(cellConfigurations.id, id));
+    const result = await db.select().from(cellConfigurations).where(eq(cellConfigurations.id, id)).limit(1);
     return result[0];
   }
 
-  async deleteVsmConfiguration(id: string): Promise<boolean> {
-    const result = await db.delete(vsmConfigurations).where(eq(vsmConfigurations.id, id));
+  async deleteCellConfiguration(id: string): Promise<boolean> {
+    const result = await db.delete(cellConfigurations).where(eq(cellConfigurations.id, id));
     return !!result;
+  }
+
+  // Scrap Incident operations
+  async getScrapIncidents(): Promise<ScrapIncident[]> {
+    return await db.select().from(scrapIncidents).orderBy(scrapIncidents.createdAt);
+  }
+
+  async getScrapIncidentsByMachine(machineId: string): Promise<ScrapIncident[]> {
+    return await db.select().from(scrapIncidents).where(eq(scrapIncidents.machineId, machineId)).orderBy(scrapIncidents.createdAt);
+  }
+
+  async createScrapIncident(incident: InsertScrapIncident): Promise<ScrapIncident> {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    const status = incident.status === 'closed' ? 'closed' : 'open';
+    await db.insert(scrapIncidents).values({
+      id,
+      machineId: incident.machineId,
+      partId: incident.partId ?? null,
+      characteristic: incident.characteristic,
+      quantity: incident.quantity,
+      estimatedCost: incident.estimatedCost,
+      note: incident.note ?? null,
+      status,
+      dateCreated: incident.dateCreated ?? null,
+      dateClosed: incident.dateClosed ?? null,
+      updatedAt: now,
+      createdAt: now,
+    });
+    const result = await db.select().from(scrapIncidents).where(eq(scrapIncidents.id, id)).limit(1);
+    return result[0]!;
+  }
+
+  async updateScrapIncident(id: string, updates: Partial<InsertScrapIncident>): Promise<ScrapIncident | undefined> {
+    const now = new Date().toISOString();
+    const updateObj: any = { updatedAt: now };
+    if (updates.machineId !== undefined) updateObj.machineId = updates.machineId;
+    if (updates.partId !== undefined) updateObj.partId = updates.partId;
+    if (updates.characteristic !== undefined) updateObj.characteristic = updates.characteristic;
+    if (updates.quantity !== undefined) updateObj.quantity = updates.quantity;
+    if (updates.estimatedCost !== undefined) updateObj.estimatedCost = updates.estimatedCost;
+    if (updates.note !== undefined) updateObj.note = updates.note;
+    if (updates.status !== undefined) updateObj.status = updates.status === 'closed' ? 'closed' : 'open';
+    if (updates.dateCreated !== undefined) updateObj.dateCreated = updates.dateCreated;
+    if (updates.dateClosed !== undefined) updateObj.dateClosed = updates.dateClosed;
+    await db.update(scrapIncidents).set(updateObj).where(eq(scrapIncidents.id, id));
+    const result = await db.select().from(scrapIncidents).where(eq(scrapIncidents.id, id)).limit(1);
+    return result[0];
+  }
+
+  async deleteScrapIncident(id: string): Promise<boolean> {
+    await db.delete(scrapIncidents).where(eq(scrapIncidents.id, id));
+    return true;
   }
 
   // SPC records — normalized 3NF operations
@@ -293,6 +355,7 @@ export class DatabaseStorage implements IStorage {
     const updateObj: any = {};
     if (updates.charNumber !== undefined) updateObj.charNumber = updates.charNumber;
     if (updates.charName !== undefined) updateObj.charName = updates.charName;
+    if (updates.nominalValue !== undefined) updateObj.nominalValue = updates.nominalValue;
     if (updates.charMax !== undefined) updateObj.charMax = updates.charMax;
     if (updates.charMin !== undefined) updateObj.charMin = updates.charMin;
     if (updates.tolerance !== undefined) updateObj.tolerance = updates.tolerance;
@@ -360,6 +423,7 @@ export class DatabaseStorage implements IStorage {
         partName: parts.partName,
         charNumber: characteristics.charNumber,
         charName: characteristics.charName,
+        nominalValue: characteristics.nominalValue,
         charMax: characteristics.charMax,
         charMin: characteristics.charMin,
         tolerance: characteristics.tolerance,
@@ -371,7 +435,7 @@ export class DatabaseStorage implements IStorage {
       })
       .from(spcMeasurements)
       .innerJoin(characteristics, eq(spcMeasurements.characteristicId, characteristics.id))
-      .innerJoin(parts, eq(characteristics.partId, parts.id))
+      .innerJoin(parts, eq(characteristics.partId as any, parts.id))
       .orderBy(spcMeasurements.createdAt);
 
     if (whereClause) {
@@ -433,6 +497,7 @@ export class DatabaseStorage implements IStorage {
         partId: part.id,
         charNumber: charNumber || '(unknown)',
         charName,
+        nominalValue: finding.nominalValue || null,
         charMax: finding.charMax || null,
         charMin: finding.charMin || null,
         tolerance: finding.tolerance || null,
@@ -477,6 +542,7 @@ export class DatabaseStorage implements IStorage {
     // Update characteristic fields if any provided
     const charUpdates: any = {};
     if (updates.charName !== undefined) charUpdates.charName = updates.charName;
+    if (updates.nominalValue !== undefined) charUpdates.nominalValue = updates.nominalValue;
     if (updates.charMax !== undefined) charUpdates.charMax = updates.charMax;
     if (updates.charMin !== undefined) charUpdates.charMin = updates.charMin;
     if (updates.tolerance !== undefined) charUpdates.tolerance = updates.tolerance;
@@ -493,7 +559,9 @@ export class DatabaseStorage implements IStorage {
         const partUpdates: any = {};
         if (updates.partNumber !== undefined) partUpdates.partNumber = updates.partNumber;
         if (updates.partName !== undefined) partUpdates.partName = updates.partName;
-        await db.update(parts).set(partUpdates).where(eq(parts.id, char[0].partId));
+        if (char[0].partId) {
+          await db.update(parts).set(partUpdates).where(eq(parts.id, char[0].partId));
+        }
       }
     }
 
