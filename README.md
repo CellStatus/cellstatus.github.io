@@ -1,44 +1,88 @@
-# CellStatus — Manufacturing Management Tool
+# CellStatus Operations Hub
 
-CellStatus is a Manufacturing Management tool for data collection and analysis. It combines machine status tracking, value stream mapping (VSM) analysis, and audit findings to help teams manage equipment, capture measurement-based issues, and improve production flow.
+CellStatus is a shop-floor operations app for tracking machine status, configuring production cells, managing part/characteristic masters, and monitoring scrap performance.
 
----
+## Navigation
 
-## ✨ Key Features
+- Dashboard
+- Characteristics
+- Parts
+- Machines
+- Cells
+- Scrap Incidents
 
-- Dashboard with live machine statuses and quick status updates
-- Machine registry and quick CRUD for machines
-- VSM Builder to model operation flows and identify bottlenecks
-- Audit Findings to record measurement-based issues and track corrective actions
+## Core Features
 
----
+### Dashboard
 
-## VSM Builder (Value Stream Mapping)
+- Machine status overview and grouped machine cards
+- Scrap analytics with:
+  - Costliest incidents
+  - Scrap by Machine
+  - Scrap by Cell
+  - Scrap by Characteristic
+  - Scrap by Part Number
 
-Build and analyze your value stream:
+### Characteristics
 
-- Process Flow Modeling: add machines, define operation numbers, group parallel machines
-- Bottleneck Analysis: identify constraints and compute utilization and throughput
+- Dedicated characteristic master page
+- Create/delete characteristics
+- Each characteristic is linked to a part number
 
----
+### Parts
 
-## Audit Findings
+- Dedicated part master page
+- Create/delete parts with:
+  - Part Number
+  - Name
+  - Material
+  - Raw Material Cost
+  - Notes
 
-The Audit Findings feature provides a user-facing interface to capture measurement-based findings for machines. Key behaviors:
+### Machines
 
-- Findings are grouped by Part Number, then by Characteristic in the UI
-- Dashboard and machine/part widgets can link directly into Audit Findings and pre-filter/expand relevant groups
-- When a Part Number filter is active the UI hides other parts so you can focus on the selected part
-- Selecting an existing characteristic makes tolerance fields read-only to preserve recorded tolerances
+- Machine list and editing
+- Machine status/state management
+- Cycle-time fields used for cell bottleneck and UPH calculations
 
-Each finding records: machine, part number/name, characteristic, tolerance (min/max), measured value, status (open/closed), and corrective action notes.
+### Cells
 
+- Cell configuration with operation-based machine assignment
+- Machines are assigned to operations (not directly to the cell)
+- Operation cycle time is computed from assigned machine cycle times using parallel-rate math
+- Cell metrics include machine count, scrap incidents, scrap cost, and bottleneck with UPH
 
-## Contributing
+### Scrap Incidents
 
-Contributions are welcome — open a pull request with a clear description of changes.
+- Create/edit/delete scrap incidents
+- Incident form includes machine, characteristic, quantity, estimated cost, note, status, and dates
+- Characteristics are selected from the master list and carry part linkage into incidents
 
----
+## Tech Stack
+
+- Frontend: React + TypeScript + Vite + Wouter + TanStack Query
+- UI: Tailwind CSS + shadcn/ui
+- Backend: Express + TypeScript
+- Database: PostgreSQL (Neon) + Drizzle ORM
+
+## Local Setup
+
+1. Install dependencies
+	- `npm install`
+2. Configure environment in `.env`
+	- `DATABASE_URL`
+	- `API_PASSWORD`
+3. Sync schema
+	- `npm run db:push`
+4. Start app
+	- `npm run dev`
+
+## Scripts
+
+- `npm run dev` — Start full-stack dev server
+- `npm run check` — Type-check project
+- `npm run db:push` — Push Drizzle schema changes
+- `npm run build` — Build production bundle
 
 ## License
 

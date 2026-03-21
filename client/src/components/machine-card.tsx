@@ -1,5 +1,4 @@
-import { Play, Pause, Wrench, AlertTriangle, Settings, MoreVertical, Pencil, Trash2, Check, X, FileText } from "lucide-react";
-import { useLocation } from "wouter";
+import { Play, Pause, Wrench, AlertTriangle, Settings, MoreVertical, Pencil, Trash2, Check, X } from "lucide-react";
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -12,20 +11,18 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 
 import type { Machine, MachineStatus } from "@shared/schema";
 
-interface MachineVSMCardProps {
+interface MachineCardProps {
   machine: Machine;
   onStatusChange: (machineId: string, status: MachineStatus) => void;
   onUpdateMachine: (data: { id: string } & Partial<Machine>) => void;
   onStatusNoteChange: (machineId: string, note: string) => void;
   onDeleteMachine: (machineId: string) => void;
+  onOpenScrapIncidents?: (machineId: string) => void;
   isPending?: boolean;
-  findingsCount?: number;
-  openFindingsCount?: number;
-  onOpenAudit?: (machineId: string) => void;
+  scrapIncidentsCount?: number;
 }
 
 const statusConfig: Record<MachineStatus, { 
@@ -66,17 +63,16 @@ const statusConfig: Record<MachineStatus, {
   },
 };
 
-export function MachineVSMCard({
+export function MachineCard({
   machine,
   onStatusChange,
   onUpdateMachine,
   onStatusNoteChange,
   onDeleteMachine,
+  onOpenScrapIncidents,
   isPending = false,
-  findingsCount = 0,
-  openFindingsCount = 0,
-  onOpenAudit,
-}: MachineVSMCardProps) {
+  scrapIncidentsCount = 0,
+}: MachineCardProps) {
   const [editingNote, setEditingNote] = useState(false);
   const [noteValue, setNoteValue] = useState(machine.statusUpdate || "");
 
@@ -84,8 +80,6 @@ export function MachineVSMCard({
 
   const config = statusConfig[machine.status];
   const StatusIcon = config.icon;
-
-  const [, setLocation] = useLocation();
 
   const handleSaveNote = () => {
     onStatusNoteChange(machine.id, noteValue);
@@ -112,28 +106,6 @@ export function MachineVSMCard({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => onOpenAudit && onOpenAudit(machine.id)}>
-                {typeof openFindingsCount === 'number' && openFindingsCount > 0 ? (
-                  <Badge variant="secondary" className="mr-2">{openFindingsCount}</Badge>
-                ) : typeof findingsCount === 'number' && findingsCount > 0 ? (
-                  <Badge variant="secondary" className="mr-2">{findingsCount}</Badge>
-                ) : null}
-                Open SPC Records
-              </DropdownMenuItem>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div>
-                    <DropdownMenuItem onClick={() => setLocation(`/spc-data?machineId=${encodeURIComponent(machine.id)}&status=open`)}>
-                      <FileText className="mr-2 h-4 w-4" />
-                      View Open SPC Records
-                    </DropdownMenuItem>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  {typeof openFindingsCount === 'number' && openFindingsCount > 0 ? `${openFindingsCount} open` : 'No open records'}
-                </TooltipContent>
-              </Tooltip>
-              <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => setEditingNote(true)}>
                 <Pencil className="mr-2 h-4 w-4" />
                 Edit Note
@@ -157,7 +129,18 @@ export function MachineVSMCard({
           {config.label}
         </Badge>
 
-        {/* VSM Info */}
+        <div className="text-xs flex items-center justify-between">
+          <span className="text-muted-foreground">Scrap Incidents:</span>
+          <button
+            type="button"
+            className="font-medium underline-offset-2 hover:underline"
+            onClick={() => onOpenScrapIncidents?.(machine.id)}
+          >
+            {scrapIncidentsCount}
+          </button>
+        </div>
+
+        {/* Cycle and reliability info */}
         {machine.idealCycleTime && (
           <div className="text-xs space-y-1">
             <div className="flex justify-between">

@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearch } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from '@/components/ui/input';
@@ -48,6 +49,7 @@ const statusConfig: Record<MachineStatus, { label: string; icon: typeof Play; cl
 
 export default function MachinesPage() {
   const { toast } = useToast();
+  const search = useSearch();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingMachine, setEditingMachine] = useState<Machine | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -57,6 +59,19 @@ export default function MachinesPage() {
     queryKey: ["/api/machines"],
   });
   const [machineSearch, setMachineSearch] = useState('');
+
+  // Auto-open edit dialog when ?id= is present in the URL
+  useEffect(() => {
+    if (!machines.length) return;
+    const params = new URLSearchParams(search);
+    const id = params.get("id");
+    if (!id) return;
+    const machine = machines.find((m) => m.id === id);
+    if (machine) {
+      setEditingMachine(machine);
+      setDialogOpen(true);
+    }
+  }, [search, machines]);
 
   const filteredMachines = machines.filter(m => {
     const q = machineSearch.trim().toLowerCase();

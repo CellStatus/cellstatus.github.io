@@ -1,11 +1,12 @@
 import { Link, useLocation } from "wouter";
 import {
   LayoutDashboard,
-  GitBranch,
   Settings2,
   Factory,
   FileText,
-  Map,
+  Workflow,
+  ListOrdered,
+  Ruler,
 } from "lucide-react";
 import {
   Sidebar,
@@ -27,22 +28,27 @@ const navItems = [
     icon: LayoutDashboard,
   },
   {
+    title: "Characteristics",
+    url: "/characteristics",
+    icon: Ruler,
+  },
+  {
+    title: "Parts",
+    url: "/parts",
+    icon: ListOrdered,
+  },
+  {
     title: "Machines",
     url: "/machines",
     icon: Settings2,
   },
   {
-    title: "VSM Builder",
-    url: "/vsm-builder",
-    icon: GitBranch,
+    title: "Cells",
+    url: "/cells",
+    icon: Workflow,
   },
   {
-    title: "VSM Viewer",
-    url: "/simple-vsm",
-    icon: Map,
-  },
-  {
-    title: "SPC Data",
+    title: "Scrap Incidents",
     url: "/spc-data",
     icon: FileText,
   },

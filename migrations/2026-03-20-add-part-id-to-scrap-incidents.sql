@@ -1,0 +1,2 @@
+ALTER TABLE scrap_incidents
+ADD COLUMN IF NOT EXISTS part_id VARCHAR;
