@@ -101,7 +101,6 @@ const getPartTrendByGranularity = (
   granularity: "day" | "week" | "month",
 ) => {
   const now = new Date();
-  const currentYear = now.getFullYear();
 
   const startOfDay = (date: Date) =>
     new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -154,20 +153,27 @@ const getPartTrendByGranularity = (
   });
 
   const periodSet = new Set(periods.map((period) => period.key));
+  const firstPeriodKey = periods.length > 0 ? periods[0].key : "";
   const periodPartTotals = new Map<string, Map<string, number>>();
   const partTotals = new Map<string, number>();
+  const prePeriodTotals = new Map<string, number>();
 
   scrapIncidents.forEach((incident) => {
     const incidentDate = parseIncidentDate(incident);
     if (!incidentDate) return;
 
     const periodKey = toIsoDate(getPeriodStart(incidentDate));
-    if (!periodSet.has(periodKey)) return;
-
     const partNumber = incident.partId ? (partById.get(incident.partId)?.partNumber || "Unknown Part") : "Unassigned";
     const incidentCost = Number(incident.estimatedCost || 0);
 
     partTotals.set(partNumber, (partTotals.get(partNumber) || 0) + incidentCost);
+
+    if (!periodSet.has(periodKey)) {
+      if (periodKey < firstPeriodKey) {
+        prePeriodTotals.set(partNumber, (prePeriodTotals.get(partNumber) || 0) + incidentCost);
+      }
+      return;
+    }
 
     if (!periodPartTotals.has(periodKey)) {
       periodPartTotals.set(periodKey, new Map());
@@ -182,8 +188,16 @@ const getPartTrendByGranularity = (
     .slice(0, 5)
     .map(([partNumber]) => partNumber);
 
-  const categoryKeys = [...topPartNumbers, "Other Parts"];
+  const hasOther = Array.from(periodPartTotals.values()).some((partCostMap) =>
+    Array.from(partCostMap.keys()).some((partNumber) => !topPartNumbers.includes(partNumber)),
+  );
+  const categoryKeys = hasOther ? [...topPartNumbers, "Other Parts"] : [...topPartNumbers];
   const cumulativeRunningTotals = new Map<string, number>();
+
+  topPartNumbers.forEach((partNumber) => {
+    const preCost = prePeriodTotals.get(partNumber) || 0;
+    if (preCost > 0) cumulativeRunningTotals.set(partNumber, preCost);
+  });
 
   const points: TrendPoint[] = periods.map((period) => {
     const periodValues: Record<string, number> = {};
@@ -207,11 +221,9 @@ const getPartTrendByGranularity = (
     }
 
     topPartNumbers.forEach((partNumber) => {
-      if (period.year === currentYear) {
-        const nextValue = (cumulativeRunningTotals.get(partNumber) || 0) + Number(periodValues[partNumber] || 0);
-        cumulativeRunningTotals.set(partNumber, nextValue);
-        cumulativeValues[partNumber] = nextValue;
-      }
+      const nextValue = (cumulativeRunningTotals.get(partNumber) || 0) + Number(periodValues[partNumber] || 0);
+      cumulativeRunningTotals.set(partNumber, nextValue);
+      cumulativeValues[partNumber] = nextValue;
     });
 
     const maxPeriodValue = categoryKeys.reduce((max, key) => Math.max(max, Number(periodValues[key] || 0)), 0);
