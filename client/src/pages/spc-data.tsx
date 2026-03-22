@@ -148,11 +148,8 @@ export default function SpcData() {
           .includes(needle);
       })
       .sort((left, right) => {
-        const latestDate = (incident: typeof left) => {
-          const candidates = [incident.dateCreated, incident.dateClosed, incident.createdAt].filter(Boolean) as string[];
-          return candidates.reduce((a, b) => (a > b ? a : b), "");
-        };
-        return latestDate(right).localeCompare(latestDate(left));
+        const createdDate = (incident: typeof left) => incident.dateCreated || incident.createdAt || "";
+        return createdDate(right).localeCompare(createdDate(left));
       });
   }, [incidents, machineById, partById, search, filterMachineId, filterCellName]);
 
