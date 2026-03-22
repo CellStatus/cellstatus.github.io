@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type { HTMLAttributes } from "react";
 import { useLocation } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -42,6 +43,9 @@ type ScrapIncident = {
   quantity: number;
   estimatedCost: number;
   status: string;
+  dateCreated: string | null;
+  dateClosed: string | null;
+  createdAt: string;
 };
 
 type CellConfiguration = {
@@ -99,6 +103,19 @@ export default function CellsPage() {
 
   const selectedCell = cells.find((cell) => cell.id === selectedId) || null;
   const isViewMode = selectedCell !== null && !isEditingCell;
+
+  const clickableCardProps = (handler: () => void): HTMLAttributes<HTMLDivElement> => ({
+    onClick: handler,
+    onKeyDown: (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        handler();
+      }
+    },
+    role: "button",
+    tabIndex: 0,
+    className: "cursor-pointer transition hover:-translate-y-[1px] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
+  });
 
   const sortedCells = useMemo(() => {
     const toCellNumber = (value: string | null) => {
@@ -254,6 +271,15 @@ export default function CellsPage() {
     () => cellIncidents.reduce((sum, i) => sum + i.estimatedCost, 0),
     [cellIncidents],
   );
+
+  const sortedCellIncidents = useMemo(() => {
+    const latestIncidentDate = (incident: ScrapIncident) => {
+      const candidates = [incident.dateCreated, incident.dateClosed, incident.createdAt].filter(Boolean) as string[];
+      return candidates.reduce((latest, candidate) => (candidate > latest ? candidate : latest), "");
+    };
+
+    return [...cellIncidents].sort((left, right) => latestIncidentDate(right).localeCompare(latestIncidentDate(left)));
+  }, [cellIncidents]);
 
   const syncMachineCellAssignments = async (targetCellName: string, previousCellName?: string | null) => {
     const updates: Promise<unknown>[] = [];
@@ -463,28 +489,43 @@ export default function CellsPage() {
         <div className="lg:col-span-2 space-y-4">
           {selectedCell && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <Card>
+              <Card {...clickableCardProps(() => setLocation(`/machines?cell=${encodeURIComponent(selectedCell.name)}`))}>
                 <CardContent className="pt-4">
                   <div className="text-xs text-muted-foreground">Machines</div>
                   <div className="text-2xl font-bold">{cellMachines.length}</div>
+                  <div className="text-xs text-muted-foreground">View machines in {selectedCell.name}</div>
                 </CardContent>
               </Card>
-              <Card>
+              <Card {...clickableCardProps(() => setLocation(`/spc-data?cell=${encodeURIComponent(selectedCell.name)}`))}>
                 <CardContent className="pt-4">
                   <div className="text-xs text-muted-foreground">Scrap Incidents</div>
                   <div className="text-2xl font-bold">{cellIncidents.length}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {cellIncidents.filter((i) => i.status === "open").length} open
-                  </div>
+                  {sortedCellIncidents.length === 0 ? (
+                    <div className="text-xs text-muted-foreground">No incidents for this cell</div>
+                  ) : (
+                    <div className="mt-2 space-y-1">
+                      {sortedCellIncidents.slice(0, 3).map((incident) => {
+                        const machine = machineById.get(incident.machineId);
+                        return (
+                          <div key={incident.id} className="text-xs text-muted-foreground">
+                            <div className="truncate font-medium text-foreground">{machine?.name || machine?.machineId || "Unknown Machine"}</div>
+                            <div className="truncate">Char #{incident.characteristic}</div>
+                            <div>${incident.estimatedCost.toLocaleString(undefined, { maximumFractionDigits: 0 })} • {incident.status}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
-              <Card>
+              <Card {...clickableCardProps(() => setLocation(`/spc-data?cell=${encodeURIComponent(selectedCell.name)}`))}>
                 <CardContent className="pt-4">
                   <div className="text-xs text-muted-foreground">Total Scrap Cost</div>
                   <div className="text-2xl font-bold">${cellTotalScrapCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+                  <div className="text-xs text-muted-foreground">Open incident log for {selectedCell.name}</div>
                 </CardContent>
               </Card>
-              <Card>
+              <Card {...clickableCardProps(() => setLocation(`/machines?cell=${encodeURIComponent(selectedCell.name)}`))}>
                 <CardContent className="pt-4">
                   <div className="text-xs text-muted-foreground flex items-center gap-1">
                     <AlertTriangle className="h-3 w-3" /> Bottleneck

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useSearch } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from '@/components/ui/input';
@@ -55,6 +55,7 @@ const statusConfig: Record<MachineStatus, { label: string; icon: typeof Play; cl
 
 export default function MachinesPage() {
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const search = useSearch();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingMachine, setEditingMachine] = useState<Machine | null>(null);
@@ -65,6 +66,15 @@ export default function MachinesPage() {
     queryKey: ["/api/machines"],
   });
   const [machineSearch, setMachineSearch] = useState('');
+  const searchParams = useMemo(() => new URLSearchParams(search), [search]);
+  const filterCell = searchParams.get("cell")?.trim() || "";
+
+  const clearCellFilter = () => {
+    const nextParams = new URLSearchParams(search);
+    nextParams.delete("cell");
+    const nextQuery = nextParams.toString();
+    setLocation(nextQuery ? `/machines?${nextQuery}` : "/machines");
+  };
 
   // Auto-open edit dialog when ?id= is present in the URL
   useEffect(() => {
@@ -80,6 +90,7 @@ export default function MachinesPage() {
   }, [search, machines]);
 
   const filteredMachines = machines.filter(m => {
+    if (filterCell && (m.cell || "") !== filterCell) return false;
     const q = machineSearch.trim().toLowerCase();
     if (!q) return true;
     return (m.name || '').toLowerCase().includes(q) || (m.machineId || '').toLowerCase().includes(q);
@@ -215,6 +226,18 @@ export default function MachinesPage() {
           <CardHeader className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <CardTitle className="text-lg">All Machines</CardTitle>
+              {filterCell && (
+                <div className="flex items-center gap-2 rounded-full border border-border px-3 py-1 text-xs text-muted-foreground">
+                  <span>Filtered to cell: {filterCell}</span>
+                  <button
+                    type="button"
+                    onClick={clearCellFilter}
+                    className="font-medium text-foreground underline-offset-2 hover:underline"
+                  >
+                    Clear cell filter
+                  </button>
+                </div>
+              )}
               {machineSearch.trim() && (
                 <span className="text-xs text-muted-foreground">Showing {filteredMachines.length} of {machines.length}</span>
               )}
