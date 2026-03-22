@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearch } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -78,6 +78,48 @@ export default function MachinesPage() {
     if (!q) return true;
     return (m.name || '').toLowerCase().includes(q) || (m.machineId || '').toLowerCase().includes(q);
   });
+
+  const sortedMachines = useMemo(() => {
+    const extractFirstNumber = (value: string) => {
+      const match = value.match(/\d+(?:\.\d+)?/);
+      if (!match) return null;
+      const parsed = Number(match[0]);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    return [...filteredMachines].sort((left, right) => {
+      const leftCell = (left.cell || "").trim();
+      const rightCell = (right.cell || "").trim();
+      const leftHasCell = leftCell.length > 0;
+      const rightHasCell = rightCell.length > 0;
+
+      if (leftHasCell && !rightHasCell) return -1;
+      if (!leftHasCell && rightHasCell) return 1;
+
+      if (leftHasCell && rightHasCell) {
+        const leftCellNumber = extractFirstNumber(leftCell);
+        const rightCellNumber = extractFirstNumber(rightCell);
+
+        if (leftCellNumber !== null && rightCellNumber !== null && leftCellNumber !== rightCellNumber) {
+          return leftCellNumber - rightCellNumber;
+        }
+
+        if (leftCellNumber !== null && rightCellNumber === null) return -1;
+        if (leftCellNumber === null && rightCellNumber !== null) return 1;
+
+        const cellCompare = leftCell.localeCompare(rightCell, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        });
+        if (cellCompare !== 0) return cellCompare;
+      }
+
+      return (left.machineId || "").localeCompare((right.machineId || ""), undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
+    });
+  }, [filteredMachines]);
 
   const createMutation = useMutation({
     mutationFn: (data: Partial<Machine>) => apiRequest("POST", "/api/machines", data),
@@ -210,7 +252,7 @@ export default function MachinesPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredMachines.map((machine) => {
+                  {sortedMachines.map((machine) => {
                     const status = statusConfig[machine.status];
                     const StatusIcon = status.icon;
                     

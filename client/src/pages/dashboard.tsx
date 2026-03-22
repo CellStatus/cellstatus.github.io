@@ -235,6 +235,16 @@ export default function Dashboard() {
   // Group machines by cell
   const machinesByCell = useMemo(() => {
     const grouped: Record<string, Machine[]> = {};
+    const cellNumberByName = new Map<string, number | null>();
+
+    (cells || []).forEach((cell) => {
+      const parsedNumber = Number(cell.status);
+      cellNumberByName.set(
+        cell.name,
+        Number.isFinite(parsedNumber) ? parsedNumber : null,
+      );
+    });
+
     filteredMachines.forEach(machine => {
       const cellName = machine.cell || "Unassigned";
       if (!grouped[cellName]) {
@@ -242,14 +252,45 @@ export default function Dashboard() {
       }
       grouped[cellName].push(machine);
     });
-    // Sort cells alphabetically, but put "Unassigned" at the end
+
+    Object.keys(grouped).forEach((cellName) => {
+      grouped[cellName].sort((left, right) =>
+        left.machineId.localeCompare(right.machineId, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        })
+      );
+    });
+
+    const extractFirstNumber = (label: string): number | null => {
+      const match = label.match(/\d+(?:\.\d+)?/);
+      if (!match) return null;
+      const parsed = Number(match[0]);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    // Sort cells: numeric first, then alphabetic (Unassigned always last)
     const sortedKeys = Object.keys(grouped).sort((a, b) => {
       if (a === "Unassigned") return 1;
       if (b === "Unassigned") return -1;
-      return a.localeCompare(b);
+
+      const aCellNumber = (cellNumberByName.get(a) ?? null) ?? extractFirstNumber(a);
+      const bCellNumber = (cellNumberByName.get(b) ?? null) ?? extractFirstNumber(b);
+
+      if (aCellNumber !== null && bCellNumber !== null && aCellNumber !== bCellNumber) {
+        return aCellNumber - bCellNumber;
+      }
+
+      if (aCellNumber !== null && bCellNumber === null) return -1;
+      if (aCellNumber === null && bCellNumber !== null) return 1;
+
+      return a.localeCompare(b, undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
     });
     return { grouped, sortedKeys };
-  }, [filteredMachines]);
+  }, [filteredMachines, cells]);
 
   // Fetch scrap incidents and group by machine
   const { data: scrapIncidents = [], isLoading: incidentsLoading } = useQuery<ScrapIncident[]>({
