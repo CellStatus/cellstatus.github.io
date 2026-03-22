@@ -147,7 +147,13 @@ export default function SpcData() {
           .toLowerCase()
           .includes(needle);
       })
-      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+      .sort((left, right) => {
+        const latestDate = (incident: typeof left) => {
+          const candidates = [incident.dateCreated, incident.dateClosed, incident.createdAt].filter(Boolean) as string[];
+          return candidates.reduce((a, b) => (a > b ? a : b), "");
+        };
+        return latestDate(right).localeCompare(latestDate(left));
+      });
   }, [incidents, machineById, partById, search, filterMachineId, filterCellName]);
 
   const characteristicLabel = (char: Characteristic) =>

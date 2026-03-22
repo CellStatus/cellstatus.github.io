@@ -604,6 +604,12 @@ export default function Dashboard() {
       .slice(0, 5)
       .map(([partNumber]) => partNumber);
 
+    // Build a part number -> part name lookup for legend labels
+    const partNameByNumber = new Map<string, string | null>();
+    parts.forEach((part) => {
+      partNameByNumber.set(part.partNumber, part.partName || null);
+    });
+
     const partKeyByNumber = new Map<string, string>();
     const cumulativeKeyByNumber = new Map<string, string>();
     topPartNumbers.forEach((partNumber, index) => {
@@ -665,12 +671,14 @@ export default function Dashboard() {
 
     const chartConfig: ChartConfig = {};
     topPartNumbers.forEach((partNumber, index) => {
+      const partName = partNameByNumber.get(partNumber);
+      const partLabel = partName ? `${partNumber} — ${partName}` : partNumber;
       chartConfig[`part${index + 1}`] = {
-        label: `${partNumber} ${periodLabel}`,
+        label: `${partLabel} ${periodLabel}`,
         color: palette[index % palette.length],
       };
       chartConfig[`part${index + 1}Cumulative`] = {
-        label: `${partNumber} Accumulated`,
+        label: `${partLabel} Accumulated`,
         color: palette[index % palette.length],
       };
     });
@@ -681,10 +689,13 @@ export default function Dashboard() {
 
     const hasOther = chartData.some((row) => Number(row.other || 0) > 0);
     const legendItems = [
-      ...topPartNumbers.map((partNumber, index) => ({
-        label: partNumber,
-        color: palette[index % palette.length],
-      })),
+      ...topPartNumbers.map((partNumber, index) => {
+        const partName = partNameByNumber.get(partNumber);
+        return {
+          label: partName ? `${partNumber} — ${partName}` : partNumber,
+          color: palette[index % palette.length],
+        };
+      }),
       ...(hasOther
         ? [{ label: "Other Parts", color: "hsl(var(--muted-foreground))" }]
         : []),
@@ -699,7 +710,7 @@ export default function Dashboard() {
       legendItems,
       periodLabel,
     };
-  }, [dashboardIncidents, partById, trendGranularity]);
+  }, [dashboardIncidents, partById, parts, trendGranularity]);
 
   const totalScrapCost = useMemo(() => {
     return incidentsWithCost.reduce((sum, incident) => sum + incident.incidentCost, 0);
