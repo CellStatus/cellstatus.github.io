@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { AlertTriangle, ChevronDown, ChevronRight, Clock, Plus, Save, Trash2, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, Clock, GripVertical, Plus, Save, Trash2, X } from "lucide-react";
 
 type CellOperation = {
   id: string;
@@ -79,6 +79,8 @@ export default function CellsPage() {
   const [operations, setOperations] = useState<CellOperation[]>([]);
   const [machinePickerByOperation, setMachinePickerByOperation] = useState<Record<string, string>>({});
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [draggedOperationId, setDraggedOperationId] = useState<string | null>(null);
+  const [dragOverOperationId, setDragOverOperationId] = useState<string | null>(null);
 
   const { data: cells = [] } = useQuery<CellConfiguration[]>({
     queryKey: ["/api/cells"],
@@ -357,6 +359,39 @@ export default function CellsPage() {
     });
   };
 
+  const moveOperation = (sourceId: string, targetId: string) => {
+    if (!sourceId || !targetId || sourceId === targetId) return;
+
+    setOperations((previous) => {
+      const sourceIndex = previous.findIndex((operation) => operation.id === sourceId);
+      const targetIndex = previous.findIndex((operation) => operation.id === targetId);
+
+      if (sourceIndex === -1 || targetIndex === -1) return previous;
+
+      const next = [...previous];
+      const [moved] = next.splice(sourceIndex, 1);
+      next.splice(targetIndex, 0, moved);
+      return next;
+    });
+  };
+
+  const handleOperationDragStart = (operationId: string) => {
+    setDraggedOperationId(operationId);
+    setDragOverOperationId(operationId);
+  };
+
+  const handleOperationDrop = (targetOperationId: string) => {
+    if (!draggedOperationId) return;
+    moveOperation(draggedOperationId, targetOperationId);
+    setDraggedOperationId(null);
+    setDragOverOperationId(null);
+  };
+
+  const handleOperationDragEnd = () => {
+    setDraggedOperationId(null);
+    setDragOverOperationId(null);
+  };
+
   const addMachineToOperation = (operationId: string, machineId: string) => {
     if (!machineId) return;
     setOperations((previous) =>
@@ -563,7 +598,24 @@ export default function CellsPage() {
                   <div className="text-sm text-muted-foreground">No operations added yet.</div>
                 ) : (
                   operations.map((operation, index) => (
-                    <div key={operation.id} className="grid md:grid-cols-12 gap-2 items-end border rounded p-2">
+                    <div
+                      key={operation.id}
+                      draggable
+                      onDragStart={() => handleOperationDragStart(operation.id)}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        if (dragOverOperationId !== operation.id) {
+                          setDragOverOperationId(operation.id);
+                        }
+                      }}
+                      onDrop={() => handleOperationDrop(operation.id)}
+                      onDragEnd={handleOperationDragEnd}
+                      className={`grid md:grid-cols-12 gap-2 items-end border rounded p-2 transition ${dragOverOperationId === operation.id ? "border-primary bg-primary/5" : "border-border"} ${draggedOperationId === operation.id ? "opacity-70" : ""}`}
+                    >
+                      <div className="md:col-span-12 flex items-center gap-2 text-xs text-muted-foreground">
+                        <GripVertical className="h-4 w-4" />
+                        <span>Drag to reorder operations</span>
+                      </div>
                       <div className="md:col-span-11">
                         <Label>Operation</Label>
                         <Input
