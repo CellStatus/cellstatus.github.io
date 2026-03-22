@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   ChartContainer,
   ChartTooltip,
@@ -820,14 +821,16 @@ export default function Dashboard() {
                 <div className="text-sm text-muted-foreground">No incident cost data found</div>
               ) : (
                 <div className="space-y-1.5">
+                  <TooltipProvider>
                   {costliestIncidents.slice(0, 3).map((incident) => (
+                    <Tooltip key={incident.id}>
+                      <TooltipTrigger asChild>
                     <button
-                      key={incident.id}
                       onClick={(event) => {
                         event.stopPropagation();
                         setLocation(`/spc-data?incidentId=${encodeURIComponent(incident.id)}`);
                       }}
-                      className="w-full flex items-center justify-between text-left"
+                      className="w-full flex items-start justify-between text-left gap-2"
                     >
                       <div className="min-w-0">
                         <div className="text-sm truncate">{incident.machineName}</div>
@@ -836,12 +839,24 @@ export default function Dashboard() {
                         </div>
                         <div className="text-xs text-muted-foreground truncate">Char #{incident.characteristic}</div>
                       </div>
-                      <div className="text-right">
-                        <div className="font-bold text-lg">${incident.incidentCost.toLocaleString()}</div>
-                          <div className="text-xs text-muted-foreground">{incident.quantity} pc{incident.quantity !== 1 ? "s" : ""} scrapped</div>
+                      <div className="text-right shrink-0">
+                        <div className="font-bold text-xl leading-tight">${incident.incidentCost.toLocaleString()}</div>
+                        <div className="text-xs text-muted-foreground">{incident.quantity} pc{incident.quantity !== 1 ? "s" : ""} scrapped</div>
                       </div>
                     </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="right" className="max-w-xs space-y-1 text-xs">
+                        <div className="font-semibold">{incident.machineName}</div>
+                        <div>{incident.partNumber}{incident.partName ? ` — ${incident.partName}` : ""}</div>
+                        <div>Char #{incident.characteristic}</div>
+                        <div>Cell: {incident.cellName}</div>
+                        <div>{incident.quantity} pc{incident.quantity !== 1 ? "s" : ""} scrapped</div>
+                        <div className="font-semibold">${incident.incidentCost.toLocaleString()}</div>
+                        {incident.dateCreated && <div>{new Date(incident.dateCreated).toLocaleDateString()}</div>}
+                      </TooltipContent>
+                    </Tooltip>
                   ))}
+                  </TooltipProvider>
                 </div>
               )}
             </CardContent>
