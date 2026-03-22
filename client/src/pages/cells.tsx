@@ -797,7 +797,12 @@ export default function CellsPage() {
                                 const machine = machineById.get(machineId);
                                 if (!machine) return null;
                                 const machineIncidents = incidentsByMachine.get(machine.id) ?? [];
-                                const characteristics = Array.from(new Set(machineIncidents.map((i) => i.characteristic)));
+                                const incidentsByChar = new Map<string, ScrapIncident[]>();
+                                machineIncidents.forEach((i) => {
+                                  const list = incidentsByChar.get(i.characteristic) ?? [];
+                                  list.push(i);
+                                  incidentsByChar.set(i.characteristic, list);
+                                });
                                 return (
                                   <div key={machine.id} className="rounded border p-2 space-y-2">
                                     <div className="flex items-center gap-2 flex-wrap">
@@ -816,11 +821,19 @@ export default function CellsPage() {
                                         {machine.idealCycleTime != null ? `${machine.idealCycleTime}s cycle` : "No cycle time"}
                                       </span>
                                     </div>
-                                    {characteristics.length > 0 && (
+                                    {incidentsByChar.size > 0 && (
                                       <div className="flex flex-wrap gap-1">
-                                        {characteristics.map((char) => (
-                                          <Badge key={char} variant="secondary" className="text-xs">{char}</Badge>
-                                        ))}
+                                        {Array.from(incidentsByChar.entries()).map(([char, charIncidents]) => {
+                                          const isSingle = charIncidents.length === 1;
+                                          const href = isSingle
+                                            ? `/spc-data?incidentId=${encodeURIComponent(charIncidents[0].id)}`
+                                            : `/spc-data?char=${encodeURIComponent(char)}&machineId=${encodeURIComponent(machine.id)}`;
+                                          return (
+                                            <button key={char} onClick={() => setLocation(href)} className="inline-flex">
+                                              <Badge variant="secondary" className="text-xs cursor-pointer hover:bg-secondary/80">{char}</Badge>
+                                            </button>
+                                          );
+                                        })}
                                       </div>
                                     )}
                                   </div>
