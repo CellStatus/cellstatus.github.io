@@ -479,6 +479,8 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
   const openIncidents = scrapIncidents.filter((incident) => incident.status !== "closed");
   const totalIncidentCost = scrapIncidents.reduce((sum, incident) => sum + Number(incident.estimatedCost || 0), 0);
   const openIncidentCost = openIncidents.reduce((sum, incident) => sum + Number(incident.estimatedCost || 0), 0);
+  const totalScrapQuantity = scrapIncidents.reduce((sum, incident) => sum + Number(incident.quantity || 0), 0);
+  const openScrapQuantity = openIncidents.reduce((sum, incident) => sum + Number(incident.quantity || 0), 0);
   const machinesWithCycleTime = machines.filter((machine) => (machine.idealCycleTime || 0) > 0).length;
 
   const topIncidents = [...scrapIncidents]
@@ -510,50 +512,65 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
   doc.setTextColor(255, 255, 255);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(22);
-  doc.text("CellStatus Operations Report", marginX, 42);
+  doc.text("Scrap Cost Analysis", marginX, 42);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
   doc.text(`Generated ${generatedAt.toLocaleString()}`, marginX, 60);
   doc.text("Includes dashboard status, master data, and scrap history.", marginX, 74);
 
-  const summaryCards = [
-    { label: "Machines", value: String(machines.length) },
-    { label: "Configured Cells", value: String(cells.length) },
-    { label: "Parts", value: String(parts.length) },
-    { label: "Characteristics", value: String(characteristics.length) },
-    { label: "Open Scrap Incidents", value: String(openIncidents.length) },
-    { label: "Recorded Scrap Incidents", value: String(scrapIncidents.length) },
-    { label: "Open Scrap Cost", value: formatCurrency(openIncidentCost) },
-    { label: "Total Scrap Cost", value: formatCurrency(totalIncidentCost) },
-  ];
-
-  let cardX = marginX;
-  let cardY = 108;
-  const cardWidth = (pageWidth - marginX * 2 - 24) / 4;
-  const cardHeight = 68;
-
-  summaryCards.forEach((card, index) => {
-    if (index === 4) {
-      cardX = marginX;
-      cardY += cardHeight + 12;
-    }
-
-    doc.setFillColor(248, 250, 252);
-    doc.setDrawColor(203, 213, 225);
-    doc.roundedRect(cardX, cardY, cardWidth, cardHeight, 8, 8, "FD");
-    doc.setTextColor(71, 85, 105);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.text(card.label.toUpperCase(), cardX + 14, cardY + 20);
-    doc.setTextColor(15, 23, 42);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(18);
-    doc.text(card.value, cardX + 14, cardY + 47);
-    cardX += cardWidth + 8;
-  });
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(15, 23, 42);
+  doc.text("Scrap Trend Metrics", marginX, 102);
 
   autoTable(doc, {
-    startY: 274,
+    startY: 110,
+    theme: "grid",
+    styles: { fontSize: 9, cellPadding: 6, overflow: "linebreak" },
+    headStyles: { fillColor: [30, 41, 59], textColor: 255 },
+    margin: { left: marginX, right: marginX },
+    tableWidth: 420,
+    head: [["Period", "Incidents", "Scrap Qty", "Scrap Cost"]],
+    body: [
+      ["This Week", safeText(timeRangeMetrics.week.incidentCount), safeText(timeRangeMetrics.week.totalQuantity), formatCurrency(timeRangeMetrics.week.totalCost)],
+      ["This Month", safeText(timeRangeMetrics.month.incidentCount), safeText(timeRangeMetrics.month.totalQuantity), formatCurrency(timeRangeMetrics.month.totalCost)],
+      ["This Year", safeText(timeRangeMetrics.year.incidentCount), safeText(timeRangeMetrics.year.totalQuantity), formatCurrency(timeRangeMetrics.year.totalCost)],
+    ],
+  });
+
+  const metricsTableBottom = (doc as any).lastAutoTable?.finalY ?? 110;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(15, 23, 42);
+  doc.text("Totals", marginX, metricsTableBottom + 18);
+
+  autoTable(doc, {
+    startY: metricsTableBottom + 24,
+    theme: "grid",
+    styles: { fontSize: 9, cellPadding: 6, overflow: "linebreak" },
+    headStyles: { fillColor: [30, 41, 59], textColor: 255 },
+    margin: { left: marginX, right: marginX },
+    tableWidth: 420,
+    head: [["Total Metric", "Value"]],
+    body: [
+      ["Machines", safeText(machines.length)],
+      ["Configured Cells", safeText(cells.length)],
+      ["Parts", safeText(parts.length)],
+      ["Characteristics", safeText(characteristics.length)],
+      ["Recorded Scrap Incidents", safeText(scrapIncidents.length)],
+      ["Open Scrap Incidents", safeText(openIncidents.length)],
+      ["Total Scrap Quantity", safeText(totalScrapQuantity)],
+      ["Open Scrap Quantity", safeText(openScrapQuantity)],
+      ["Total Scrap Cost", formatCurrency(totalIncidentCost)],
+      ["Open Scrap Cost", formatCurrency(openIncidentCost)],
+    ],
+  });
+
+  const totalsTableBottom = (doc as any).lastAutoTable?.finalY ?? (metricsTableBottom + 24);
+
+  autoTable(doc, {
+    startY: totalsTableBottom + 16,
     theme: "grid",
     styles: { fontSize: 9, cellPadding: 6, overflow: "linebreak" },
     headStyles: { fillColor: [30, 41, 59], textColor: 255 },
@@ -573,10 +590,10 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
   doc.setTextColor(15, 23, 42);
-  doc.text("Top Scrap Incidents", 330, 282);
+  doc.text("Top Scrap Incidents", 330, totalsTableBottom + 24);
 
   autoTable(doc, {
-    startY: 292,
+    startY: totalsTableBottom + 34,
     theme: "striped",
     styles: { fontSize: 8, cellPadding: 5, overflow: "linebreak" },
     headStyles: { fillColor: [190, 24, 93], textColor: 255 },
@@ -603,31 +620,11 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
   doc.setFont("helvetica", "bold");
   doc.setTextColor(15, 23, 42);
   doc.setFontSize(16);
-  doc.text("Scrap Trend Metrics", marginX, 40);
+  doc.text("Scrap Cost Trend Graph", marginX, 40);
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
   doc.setTextColor(71, 85, 105);
-  doc.text(
-    `Trend granularity: ${chartGranularity === "day" ? "Daily" : chartGranularity === "week" ? "Weekly" : "Monthly"}`,
-    marginX,
-    52,
-  );
-
-  autoTable(doc, {
-    startY: 62,
-    theme: "grid",
-    styles: { fontSize: 9, cellPadding: 6, overflow: "linebreak" },
-    headStyles: { fillColor: [30, 41, 59], textColor: 255 },
-    margin: { left: marginX, right: marginX },
-    tableWidth: 420,
-    head: [["Period", "Incidents", "Scrap Qty", "Scrap Cost"]],
-    body: [
-      ["This Week", safeText(timeRangeMetrics.week.incidentCount), safeText(timeRangeMetrics.week.totalQuantity), formatCurrency(timeRangeMetrics.week.totalCost)],
-      ["This Month", safeText(timeRangeMetrics.month.incidentCount), safeText(timeRangeMetrics.month.totalQuantity), formatCurrency(timeRangeMetrics.month.totalCost)],
-      ["This Year", safeText(timeRangeMetrics.year.incidentCount), safeText(timeRangeMetrics.year.totalQuantity), formatCurrency(timeRangeMetrics.year.totalCost)],
-    ],
-  });
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
@@ -635,14 +632,14 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
   doc.text(
     `${chartGranularity === "day" ? "Daily (Last 14 Days)" : chartGranularity === "week" ? "Weekly (Last 12 Weeks)" : "Monthly (Last 12 Months)"} Scrap Cost by Part with Current-Year Accumulated Trendlines`,
     marginX,
-    166,
+    74,
   );
 
   drawStackedBarChart(doc, {
     x: marginX,
-    y: 176,
+    y: 84,
     width: pageWidth - marginX * 2,
-    height: 332,
+    height: pageHeight - 104,
     points: trend.points,
     categories: trend.categories,
     lineCategories: trend.lineCategories,
@@ -801,10 +798,9 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
     doc.setTextColor(100, 116, 139);
-    doc.text("CellStatus Operations Report", marginX, pageHeight - 18);
+    doc.text("Scrap Cost Analysis", marginX, pageHeight - 18);
     doc.text(`Page ${page} of ${pageCount}`, pageWidth - marginX, pageHeight - 18, { align: "right" });
   }
 
-  const dateStamp = generatedAt.toISOString().slice(0, 10);
-  doc.save(`cellstatus-operations-report-${dateStamp}.pdf`);
+  doc.save("Scrap Cost Analysis.pdf");
 }
