@@ -1,6 +1,6 @@
-# CellStatus Operations Hub
+# Production & Scrap Cost Analysis Dashboard
 
-CellStatus is a shop-floor operations app for tracking machine status, configuring production cells, managing part/characteristic masters, and monitoring scrap performance.
+CellStatus is a manufacturing analytics platform for tracking machine status, optimizing production cells, managing part/characteristic masters, and analyzing scrap costs and production efficiency.
 
 ## Navigation
 

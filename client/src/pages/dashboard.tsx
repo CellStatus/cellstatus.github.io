@@ -757,10 +757,10 @@ export default function Dashboard() {
             <Factory className="h-10 w-10 text-primary" />
             <div>
               <h1 className="text-2xl font-bold">
-                CellStatus Operations Hub
+                Production & Scrap Cost Analysis
               </h1>
               <p className="text-sm text-muted-foreground mt-1">
-                Manage machines, configure production cells, and monitor scrap performance
+                Monitor production efficiency and analyze scrap cost trends
               </p>
             </div>
           </div>
