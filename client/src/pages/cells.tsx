@@ -210,7 +210,7 @@ export default function CellsPage() {
     return (operation.machineIds ?? [])
       .map((machineId) => machineById.get(machineId))
       .filter((machine): machine is Machine => Boolean(machine))
-      .filter((machine) => machine.status !== "down")
+      .filter((machine) => machine.status === "running")
       .map((machine) => machine.idealCycleTime ?? null)
       .filter((cycleTime): cycleTime is number => typeof cycleTime === "number" && cycleTime > 0);
   };
@@ -585,10 +585,10 @@ export default function CellsPage() {
                           <div className="text-xs text-muted-foreground">
                             Effective Operation Cycle Time: {(() => {
                               const operationCycleTimeSec = getOperationCycleTimeSec(operation);
-                              if (operationCycleTimeSec == null) return "Unavailable (no assigned machine cycle times)";
+                              if (operationCycleTimeSec == null) return "Unavailable (no running machines with cycle times)";
                               const machineCount = getOperationContributingCycleTimes(operation).length;
                               if (machineCount <= 1) return `${operationCycleTimeSec.toFixed(1)}s`;
-                              return `${operationCycleTimeSec.toFixed(1)}s (based on ${machineCount} machines in parallel)`;
+                              return `${operationCycleTimeSec.toFixed(1)}s (based on ${machineCount} running machines in parallel)`;
                             })()}
                           </div>
                         </div>
@@ -676,10 +676,10 @@ export default function CellsPage() {
                           Effective Operation Cycle Time:{" "}
                           {(() => {
                             const operationCycleTimeSec = getOperationCycleTimeSec(operation);
-                            if (operationCycleTimeSec == null) return "Unavailable (no assigned machine cycle times)";
+                            if (operationCycleTimeSec == null) return "Unavailable (no running machines with cycle times)";
                             const machineCount = getOperationContributingCycleTimes(operation).length;
                             if (machineCount <= 1) return `${operationCycleTimeSec.toFixed(1)}s`;
-                            return `${operationCycleTimeSec.toFixed(1)}s (based on ${machineCount} machines in parallel)`;
+                            return `${operationCycleTimeSec.toFixed(1)}s (based on ${machineCount} running machines in parallel)`;
                           })()}
                         </div>
                         {(operation.machineIds ?? []).length === 0 ? (
@@ -785,9 +785,9 @@ export default function CellsPage() {
                             Effective Operation Cycle Time:{" "}
                             {operationCycleTimeSec != null
                               ? (getOperationContributingCycleTimes(operation).length > 1
-                                  ? `${operationCycleTimeSec.toFixed(1)}s (based on ${getOperationContributingCycleTimes(operation).length} machines in parallel)`
+                                  ? `${operationCycleTimeSec.toFixed(1)}s (based on ${getOperationContributingCycleTimes(operation).length} running machines in parallel)`
                                   : `${operationCycleTimeSec.toFixed(1)}s`)
-                              : "Unavailable (no assigned machine cycle times)"}
+                              : "Unavailable (no running machines with cycle times)"}
                           </div>
                           {opMachineIds.length === 0 ? (
                             <div className="text-xs text-muted-foreground">No machines assigned.</div>
