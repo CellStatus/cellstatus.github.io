@@ -59,8 +59,10 @@ type CostliestIncident = {
   machineName: string;
   cellName: string;
   characteristic: string;
+  partNumber: string;
   quantity: number;
   incidentCost: number;
+  dateCreated: string | null;
 };
 
 type CharScrapSummary = {
@@ -321,10 +323,17 @@ export default function Dashboard() {
     return map;
   }, [dashboardIncidents]);
 
+  const partById = useMemo(() => {
+    const map = new Map<string, Part>();
+    (parts || []).forEach((part) => map.set(part.id, part));
+    return map;
+  }, [parts]);
+
   const incidentsWithCost = useMemo<CostliestIncident[]>(() => {
     return (dashboardIncidents || [])
       .map((incident) => {
         const machine = machines.find((item) => item.id === incident.machineId);
+        const part = incident.partId ? partById.get(incident.partId) : null;
         return {
           id: incident.id,
           machineId: incident.machineId,
@@ -332,12 +341,14 @@ export default function Dashboard() {
           machineName: machine?.name || incident.machineId || "Unknown Machine",
           cellName: machine?.cell || "Unassigned",
           characteristic: incident.characteristic || "(unknown)",
+          partNumber: part?.partNumber || "Unknown",
           quantity: incident.quantity,
           incidentCost: Number(incident.estimatedCost || 0),
+          dateCreated: incident.dateCreated || incident.createdAt || null,
         };
       })
       .filter((incident) => incident.incidentCost >= 0);
-  }, [machines, dashboardIncidents]);
+  }, [machines, dashboardIncidents, partById]);
 
   const costliestIncidents = useMemo<CostliestIncident[]>(() => {
     return [...incidentsWithCost]
@@ -389,12 +400,6 @@ export default function Dashboard() {
 
   const highestScrapMachine = machineScrapSummary[0];
   const highestScrapCell = cellScrapSummary[0];
-
-  const partById = useMemo(() => {
-    const map = new Map<string, Part>();
-    (parts || []).forEach((part) => map.set(part.id, part));
-    return map;
-  }, [parts]);
 
   const charScrapSummary = useMemo<CharScrapSummary[]>(() => {
     const map = new Map<string, CharScrapSummary>();
@@ -839,19 +844,28 @@ export default function Dashboard() {
           <Card {...clickableCardProps(() => goToSpcData())}>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                Cost in Top Incidents
+                Cost of Scrap Incidents
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-rose-600">${totalScrapCost.toLocaleString()}</div>
-              <p className="text-xs text-muted-foreground">
-                across top {costliestIncidents.length} costliest incidents
+              <p className="text-xs text-muted-foreground mb-2">
+                top {costliestIncidents.length} costliest incidents
               </p>
               {costliestIncidents.length > 0 && (
-                <div className="mt-2 space-y-1">
-                  {costliestIncidents.slice(0, 2).map((incident) => (
-                    <div key={`${incident.id}-summary`} className="text-xs text-muted-foreground truncate">
-                      {incident.characteristic}: ${incident.incidentCost.toLocaleString()}
+                <div className="space-y-0.5">
+                  <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-2 text-[10px] font-medium text-muted-foreground border-b pb-0.5">
+                    <span>Part</span>
+                    <span className="text-right">Qty</span>
+                    <span className="text-right">Cost</span>
+                    <span className="text-right">Date</span>
+                  </div>
+                  {costliestIncidents.map((incident) => (
+                    <div key={`${incident.id}-summary`} className="grid grid-cols-[1fr_auto_auto_auto] gap-x-2 text-[10px] text-muted-foreground">
+                      <span className="truncate">{incident.partNumber}</span>
+                      <span className="text-right">{incident.quantity}</span>
+                      <span className="text-right">${incident.incidentCost.toLocaleString()}</span>
+                      <span className="text-right">{incident.dateCreated ? new Date(incident.dateCreated).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "—"}</span>
                     </div>
                   ))}
                 </div>
