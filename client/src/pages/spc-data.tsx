@@ -59,6 +59,7 @@ export default function SpcData() {
   const [formOpen, setFormOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deletingIncidentId, setDeletingIncidentId] = useState<string | null>(null);
+  const [pendingOpenIncidentId, setPendingOpenIncidentId] = useState<string | null>(null);
 
   const { data: machines = [] } = useQuery<Machine[]>({
     queryKey: ["/api/machines"],
@@ -86,6 +87,7 @@ export default function SpcData() {
       const machineId = u.searchParams.get("machineId");
       const cell = u.searchParams.get("cell");
       const char = u.searchParams.get("char");
+      const incidentId = u.searchParams.get("incidentId");
       if (machineId) {
         setForm((prev) => ({ ...prev, machineId }));
         setFilterMachineId(machineId);
@@ -94,10 +96,22 @@ export default function SpcData() {
         setFilterCellName(cell);
       }
       if (char) setSearch(char);
+      if (incidentId) setPendingOpenIncidentId(incidentId);
     } catch {
       // ignore URL parsing errors
     }
   }, []);
+
+  useEffect(() => {
+    if (!pendingOpenIncidentId || incidents.length === 0) return;
+    const target = incidents.find((i) => i.id === pendingOpenIncidentId);
+    if (target) {
+      setPendingOpenIncidentId(null);
+      openIncident(target);
+    }
+  // openIncident is stable (defined in render scope) — incidents is the real dependency
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incidents, pendingOpenIncidentId]);
 
   const machineById = useMemo(() => {
     const map = new Map<string, Machine>();

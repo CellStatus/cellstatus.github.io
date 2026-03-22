@@ -699,8 +699,8 @@ export default function Dashboard() {
   }, [dashboardIncidents, partById, trendGranularity]);
 
   const totalScrapCost = useMemo(() => {
-    return costliestIncidents.reduce((sum, incident) => sum + incident.incidentCost, 0);
-  }, [costliestIncidents]);
+    return incidentsWithCost.reduce((sum, incident) => sum + incident.incidentCost, 0);
+  }, [incidentsWithCost]);
 
   const cellMetrics = useMemo(() => {
     const configuredCells = cells.length;
@@ -823,7 +823,7 @@ export default function Dashboard() {
                       key={incident.id}
                       onClick={(event) => {
                         event.stopPropagation();
-                        setLocation(`/spc-data?machineId=${encodeURIComponent(incident.machineId)}&char=${encodeURIComponent(incident.characteristic)}`);
+                        setLocation(`/spc-data?incidentId=${encodeURIComponent(incident.id)}`);
                       }}
                       className="w-full flex items-center justify-between text-left"
                     >
@@ -850,7 +850,7 @@ export default function Dashboard() {
             <CardContent>
               <div className="text-3xl font-bold text-rose-600">${totalScrapCost.toLocaleString()}</div>
               <p className="text-xs text-muted-foreground mb-2">
-                top {costliestIncidents.length} costliest incidents
+                {incidentsWithCost.length} incident{incidentsWithCost.length !== 1 ? "s" : ""}
               </p>
               {costliestIncidents.length > 0 && (
                 <div className="space-y-0.5">
