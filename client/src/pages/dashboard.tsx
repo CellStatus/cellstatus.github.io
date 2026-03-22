@@ -1219,32 +1219,21 @@ export default function Dashboard() {
 
         {/* Machines Section */}
         <div>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-4">
-              <h2 className="text-lg font-semibold flex items-center gap-2">
+            <div className="mb-4 space-y-3">
+              <h2 className="flex items-center gap-2 text-lg font-semibold">
                 <Cog className="h-5 w-5" />
                 Machines
               </h2>
-              <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-green-500" />Running</span>
-                <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-yellow-500" />Idle</span>
-                <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-blue-500" />Setup</span>
-                <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-orange-500" />Maintenance</span>
-                <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-red-500" />Down</span>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="relative">
+              <div className="relative w-full max-w-md">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
                   type="text"
                   placeholder="Search machines or cells..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9 w-64"
+                  className="w-full pl-9"
                 />
               </div>
-            </div>
           </div>
 
           {machinesLoading ? (
