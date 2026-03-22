@@ -60,6 +60,7 @@ type CostliestIncident = {
   cellName: string;
   characteristic: string;
   partNumber: string;
+  partName: string | null;
   quantity: number;
   incidentCost: number;
   dateCreated: string | null;
@@ -342,6 +343,7 @@ export default function Dashboard() {
           cellName: machine?.cell || "Unassigned",
           characteristic: incident.characteristic || "(unknown)",
           partNumber: part?.partNumber || "Unknown",
+          partName: part?.partName || null,
           quantity: incident.quantity,
           incidentCost: Number(incident.estimatedCost || 0),
           dateCreated: incident.dateCreated || incident.createdAt || null,
@@ -829,7 +831,10 @@ export default function Dashboard() {
                     >
                       <div className="min-w-0">
                         <div className="text-sm truncate">{incident.machineName}</div>
-                        <div className="text-xs text-muted-foreground truncate">{incident.characteristic}</div>
+                        <div className="text-xs text-muted-foreground truncate">
+                          {incident.partNumber}{incident.partName ? ` — ${incident.partName}` : ""}
+                        </div>
+                        <div className="text-xs text-muted-foreground truncate">Char #{incident.characteristic}</div>
                       </div>
                       <div className="text-right">
                         <div className="font-bold text-lg">${incident.incidentCost.toLocaleString()}</div>
