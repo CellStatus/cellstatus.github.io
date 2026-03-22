@@ -5,7 +5,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { ChevronDown, ChevronUp, Pencil, Plus, Trash2 } from "lucide-react";
@@ -49,13 +60,15 @@ export default function CharacteristicsPage() {
   const [form, setForm] = useState<CharacteristicForm>(emptyForm);
   const [newCharacteristicOpen, setNewCharacteristicOpen] = useState(false);
   const [editingCharacteristicId, setEditingCharacteristicId] = useState<string | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deletingChar, setDeletingChar] = useState<Characteristic | null>(null);
 
   const { data: parts = [] } = useQuery<Part[]>({
     queryKey: ["/api/parts"],
     queryFn: () => apiRequest("GET", "/api/parts"),
   });
 
-  const { data: characteristics = [] } = useQuery<Characteristic[]>({
+  const { data: characteristics = [], isLoading } = useQuery<Characteristic[]>({
     queryKey: ["/api/characteristics"],
     queryFn: () => apiRequest("GET", "/api/characteristics"),
   });
@@ -400,8 +413,17 @@ export default function CharacteristicsPage() {
           <CardTitle>Characteristic Master</CardTitle>
         </CardHeader>
         <CardContent>
-          {characteristics.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No characteristics defined yet.</p>
+          {isLoading ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-10 w-full" />
+              ))}
+            </div>
+          ) : characteristics.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <Plus className="h-10 w-10 text-muted-foreground/50 mb-3" />
+              <p className="text-sm text-muted-foreground">No characteristics defined yet. Click "New Characteristic" to get started.</p>
+            </div>
           ) : (
             <div className="overflow-auto">
               <table className="w-full text-sm">
@@ -443,7 +465,10 @@ export default function CharacteristicsPage() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() => deleteMutation.mutate(char.id)}
+                            onClick={() => {
+                              setDeletingChar(char);
+                              setDeleteConfirmOpen(true);
+                            }}
                             disabled={deleteMutation.isPending}
                           >
                             <Trash2 className="h-4 w-4" />
@@ -458,6 +483,29 @@ export default function CharacteristicsPage() {
           )}
         </CardContent>
       </Card>
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Characteristic</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete characteristic "{deletingChar?.charNumber}"? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (deletingChar) deleteMutation.mutate(deletingChar.id);
+                setDeleteConfirmOpen(false);
+                setDeletingChar(null);
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

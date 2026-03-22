@@ -5,6 +5,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { ChevronDown, ChevronUp, Pencil, Plus, Trash2 } from "lucide-react";
@@ -31,8 +42,10 @@ export default function PartsPage() {
   const [form, setForm] = useState<PartForm>(emptyForm);
   const [newPartOpen, setNewPartOpen] = useState(false);
   const [editingPartId, setEditingPartId] = useState<string | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deletingPart, setDeletingPart] = useState<Part | null>(null);
 
-  const { data: parts = [] } = useQuery<Part[]>({
+  const { data: parts = [], isLoading } = useQuery<Part[]>({
     queryKey: ["/api/parts"],
     queryFn: () => apiRequest("GET", "/api/parts"),
   });
@@ -207,8 +220,17 @@ export default function PartsPage() {
           <CardTitle>Part Master</CardTitle>
         </CardHeader>
         <CardContent>
-          {parts.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No parts added yet.</p>
+          {isLoading ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-10 w-full" />
+              ))}
+            </div>
+          ) : parts.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <Plus className="h-10 w-10 text-muted-foreground/50 mb-3" />
+              <p className="text-sm text-muted-foreground">No parts added yet. Click "New Part" to get started.</p>
+            </div>
           ) : (
             <div className="overflow-auto">
               <table className="w-full text-sm">
@@ -246,7 +268,10 @@ export default function PartsPage() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() => deleteMutation.mutate(part.id)}
+                            onClick={() => {
+                              setDeletingPart(part);
+                              setDeleteConfirmOpen(true);
+                            }}
                             disabled={deleteMutation.isPending}
                           >
                             <Trash2 className="h-4 w-4" />
@@ -261,6 +286,29 @@ export default function PartsPage() {
           )}
         </CardContent>
       </Card>
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Part</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete part "{deletingPart?.partNumber}"? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (deletingPart) deleteMutation.mutate(deletingPart.id);
+                setDeleteConfirmOpen(false);
+                setDeletingPart(null);
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

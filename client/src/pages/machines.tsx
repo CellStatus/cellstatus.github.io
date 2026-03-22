@@ -24,6 +24,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { MachineDialog, type MachineSubmitData } from "@/components/machine-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -207,7 +213,12 @@ export default function MachinesPage() {
       <div className="flex-1 overflow-auto p-6">
         <Card>
           <CardHeader className="flex items-center justify-between">
-            <CardTitle className="text-lg">All Machines</CardTitle>
+            <div className="flex items-center gap-3">
+              <CardTitle className="text-lg">All Machines</CardTitle>
+              {machineSearch.trim() && (
+                <span className="text-xs text-muted-foreground">Showing {filteredMachines.length} of {machines.length}</span>
+              )}
+            </div>
             <div className="flex items-center gap-2">
               <Input placeholder="Search by name or ID" value={machineSearch} onChange={(e) => setMachineSearch(e.target.value)} className="w-64" />
             </div>
@@ -247,7 +258,18 @@ export default function MachinesPage() {
                     <TableHead className="text-right">Setup Time</TableHead>
                     <TableHead className="text-right">Pcs/Setup</TableHead>
                     <TableHead className="text-right">Reliability</TableHead>
-                    <TableHead className="text-right">Throughput (UPH)</TableHead>
+                    <TableHead className="text-right">
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="cursor-help border-b border-dotted border-muted-foreground">Throughput (UPH)</span>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="max-w-xs">
+                            <p>Units Per Hour = 3600 / (Cycle Time + Setup Time / Batch Size) × Reliability %</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </TableHead>
                     <TableHead className="w-[100px]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>

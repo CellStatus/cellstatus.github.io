@@ -768,6 +768,31 @@ export default function Dashboard() {
       </div>
 
       <div className="flex-1 p-6 space-y-6">
+        {reportLoading ? (
+          <div className="space-y-6">
+            <div className="grid gap-4 grid-cols-1 md:grid-cols-5">
+              {[1, 2, 3, 4, 5].map((i) => (
+                <Card key={i}>
+                  <CardHeader className="pb-2"><Skeleton className="h-4 w-32" /></CardHeader>
+                  <CardContent><Skeleton className="h-8 w-24" /></CardContent>
+                </Card>
+              ))}
+            </div>
+            <Card>
+              <CardHeader><Skeleton className="h-4 w-48" /></CardHeader>
+              <CardContent><Skeleton className="h-[320px] w-full" /></CardContent>
+            </Card>
+            <div className="space-y-4">
+              {[1, 2].map((i) => (
+                <Card key={i}>
+                  <CardHeader><Skeleton className="h-6 w-48" /></CardHeader>
+                  <CardContent><Skeleton className="h-24 w-full" /></CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+        ) : (
+        <>
         {/* Summary Cards */}
         <div className="grid gap-4 grid-cols-1 md:grid-cols-5">
           <Card {...clickableCardProps(() => goToSpcData())}>
@@ -1174,10 +1199,19 @@ export default function Dashboard() {
         {/* Machines Section */}
         <div>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold flex items-center gap-2">
-              <Cog className="h-5 w-5" />
-              Machines
-            </h2>
+            <div className="flex items-center gap-4">
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <Cog className="h-5 w-5" />
+                Machines
+              </h2>
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-green-500" />Running</span>
+                <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-yellow-500" />Idle</span>
+                <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-blue-500" />Setup</span>
+                <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-orange-500" />Maintenance</span>
+                <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-red-500" />Down</span>
+              </div>
+            </div>
             <div className="flex items-center gap-3">
               <div className="relative">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -1300,6 +1334,8 @@ export default function Dashboard() {
             {isExportingReport ? "Generating PDF..." : "Export PDF Report"}
           </Button>
         </div>
+        </>
+        )}
       </div>
 
       {/* Machine Dialog */}

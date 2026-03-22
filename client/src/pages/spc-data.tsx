@@ -5,6 +5,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { ChevronDown, ChevronUp, Calculator } from "lucide-react";
@@ -46,13 +57,15 @@ export default function SpcData() {
   const [form, setForm] = useState<IncidentForm>(emptyForm);
   const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set());
   const [formOpen, setFormOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deletingIncidentId, setDeletingIncidentId] = useState<string | null>(null);
 
   const { data: machines = [] } = useQuery<Machine[]>({
     queryKey: ["/api/machines"],
     queryFn: async () => apiRequest("GET", "/api/machines"),
   });
 
-  const { data: incidents = [] } = useQuery<ScrapIncident[]>({
+  const { data: incidents = [], isLoading: incidentsLoading } = useQuery<ScrapIncident[]>({
     queryKey: ["/api/scrap-incidents"],
     queryFn: async () => apiRequest("GET", "/api/scrap-incidents"),
   });
@@ -209,6 +222,15 @@ export default function SpcData() {
       toast({
         title: "Invalid values",
         description: "Quantity must be > 0 and estimated cost must be ≥ 0.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (form.dateCreated && form.dateClosed && form.dateClosed < form.dateCreated) {
+      toast({
+        title: "Invalid dates",
+        description: "Date Closed cannot be before Date Created.",
         variant: "destructive",
       });
       return;
@@ -539,7 +561,12 @@ export default function SpcData() {
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between gap-3">
-            <CardTitle>Incident Log</CardTitle>
+            <div className="flex items-center gap-3">
+              <CardTitle>Incident Log</CardTitle>
+              {search.trim() && (
+                <span className="text-xs text-muted-foreground">Showing {rows.length} of {incidents.length}</span>
+              )}
+            </div>
             <Input
               className="max-w-sm"
               placeholder="Search by part, machine, characteristic, status..."
@@ -549,7 +576,13 @@ export default function SpcData() {
           </div>
         </CardHeader>
         <CardContent>
-          {rows.length === 0 ? (
+          {incidentsLoading ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-10 w-full" />
+              ))}
+            </div>
+          ) : rows.length === 0 ? (
             <div className="text-sm text-muted-foreground">No scrap incidents recorded.</div>
           ) : (
             <div className="overflow-auto">
@@ -619,7 +652,8 @@ export default function SpcData() {
                             variant="destructive"
                             onClick={(event) => {
                               event.stopPropagation();
-                              deleteMutation.mutate(row.id);
+                              setDeletingIncidentId(row.id);
+                              setDeleteConfirmOpen(true);
                             }}
                             disabled={deleteMutation.isPending}
                           >
@@ -636,6 +670,29 @@ export default function SpcData() {
           )}
         </CardContent>
       </Card>
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Scrap Incident</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this scrap incident? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (deletingIncidentId) deleteMutation.mutate(deletingIncidentId);
+                setDeleteConfirmOpen(false);
+                setDeletingIncidentId(null);
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
