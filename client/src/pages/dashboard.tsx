@@ -716,11 +716,6 @@ export default function Dashboard() {
     return incidentsWithCost.reduce((sum, incident) => sum + incident.incidentCost, 0);
   }, [incidentsWithCost]);
 
-  const cellMetrics = useMemo(() => {
-    const configuredCells = cells.length;
-    return { configuredCells };
-  }, [cells]);
-
   const toggleCell = (cellName: string) => {
     setExpandedCells(prev => {
       const newSet = new Set(prev);
@@ -901,14 +896,6 @@ export default function Dashboard() {
                   ))}
                 </div>
               )}
-            </CardContent>
-          </Card>
-          <Card {...clickableCardProps(() => setLocation('/cells'))}>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Configured Cells</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-sky-600">{cellMetrics.configuredCells}</div>
             </CardContent>
           </Card>
           <Card {...clickableCardProps(() => highestScrapMachine && setLocation(`/spc-data?machineId=${encodeURIComponent(highestScrapMachine.machineId)}`))}>
