@@ -58,6 +58,36 @@ CellStatus is a manufacturing analytics platform for tracking machine status, op
 - Incident form includes machine, characteristic, quantity, estimated cost, note, status, and dates
 - Characteristics are selected from the master list and carry part linkage into incidents
 
+## Screenshots
+
+### Dashboard Overview
+Full dashboard view showing machine status cards and the scrap cost trend chart with granularity selector
+![Dashboard Overview](screenshots/01-dashboard-overview.png)
+
+### Scrap Analytics Charts
+Shows the scrap breakdown charts (by Machine, Cell, Characteristic, Part Number)
+![Scrap Analytics](screenshots/02-scrap-analytics.png)
+
+### Machines Page
+The machines list table ordered by cell and machine number
+![Machines Table](screenshots/03-machines-table.png)
+
+### Cells Page with Configuration
+Shows the cell list (collapsible) and cell detail editor with operations/machines assigned
+![Cells Configuration](screenshots/04-cells-configuration.png)
+
+### Scrap Incidents Form
+Shows the form for creating scrap incidents with machine, characteristic, quantity, cost fields
+![Scrap Incident Creation](screenshots/05-scrap-incident-creation.png)
+
+### Parts Master
+The parts list page showing Part Number, Name, Material, Raw Material Cost
+![Parts Master](screenshots/06-parts-master.png)
+
+### Characteristics Master
+The characteristics list page showing characteristics linked to part numbers
+![Characteristics Master](screenshots/07-characteristics-master.png)
+
 ## Tech Stack
 
 - Frontend: React + TypeScript + Vite + Wouter + TanStack Query
