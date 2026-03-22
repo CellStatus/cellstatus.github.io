@@ -504,7 +504,6 @@ export default function Dashboard() {
 
   const scrapCostTrendChart = useMemo(() => {
     const now = new Date();
-    const currentYear = now.getFullYear();
     const startOfDay = (date: Date) =>
       new Date(date.getFullYear(), date.getMonth(), date.getDate());
     const startOfWeek = (date: Date) => {
@@ -551,13 +550,14 @@ export default function Dashboard() {
       return {
         key: toIsoDate(start),
         label: formatPeriodLabel(start),
-        year: start.getFullYear(),
       };
     });
 
     const periodSet = new Set(periods.map((period) => period.key));
+    const firstPeriodKey = periods.length > 0 ? periods[0].key : "";
     const periodPartTotals = new Map<string, Map<string, number>>();
     const partTotals = new Map<string, number>();
+    const prePeriodTotals = new Map<string, number>();
 
     const resolveIncidentDate = (incident: ScrapIncident) => {
       const rawDate = incident.dateCreated || incident.createdAt || incident.updatedAt;
@@ -571,12 +571,18 @@ export default function Dashboard() {
       if (!incidentDate) return;
 
       const periodKey = toIsoDate(getPeriodStart(incidentDate));
-      if (!periodSet.has(periodKey)) return;
-
       const partNumber = incident.partId ? (partById.get(incident.partId)?.partNumber || "Unknown Part") : "Unassigned";
       const incidentCost = Number(incident.estimatedCost || 0);
 
       partTotals.set(partNumber, (partTotals.get(partNumber) || 0) + incidentCost);
+
+      if (!periodSet.has(periodKey)) {
+        // Accumulate costs from before the visible period range
+        if (periodKey < firstPeriodKey) {
+          prePeriodTotals.set(partNumber, (prePeriodTotals.get(partNumber) || 0) + incidentCost);
+        }
+        return;
+      }
 
       if (!periodPartTotals.has(periodKey)) {
         periodPartTotals.set(periodKey, new Map());
@@ -597,7 +603,12 @@ export default function Dashboard() {
       cumulativeKeyByNumber.set(partNumber, `part${index + 1}Cumulative`);
     });
 
+    // Seed cumulative totals with costs from before the visible range
     const cumulativeRunningTotals = new Map<string, number>();
+    topPartNumbers.forEach((partNumber) => {
+      const preCost = prePeriodTotals.get(partNumber) || 0;
+      if (preCost > 0) cumulativeRunningTotals.set(partNumber, preCost);
+    });
 
     const chartData = periods.map((period) => {
       const row: Record<string, string | number> = {
@@ -627,13 +638,9 @@ export default function Dashboard() {
         const cumulativeKey = cumulativeKeyByNumber.get(partNumber);
         if (!monthlyKey || !cumulativeKey) return;
 
-        if (period.year === currentYear) {
-          const nextValue = (cumulativeRunningTotals.get(partNumber) || 0) + Number(row[monthlyKey] || 0);
-          cumulativeRunningTotals.set(partNumber, nextValue);
-          row[cumulativeKey] = nextValue;
-        } else {
-          row[cumulativeKey] = null as unknown as number;
-        }
+        const nextValue = (cumulativeRunningTotals.get(partNumber) || 0) + Number(row[monthlyKey] || 0);
+        cumulativeRunningTotals.set(partNumber, nextValue);
+        row[cumulativeKey] = nextValue;
       });
 
       return row;
@@ -655,7 +662,7 @@ export default function Dashboard() {
         color: palette[index % palette.length],
       };
       chartConfig[`part${index + 1}Cumulative`] = {
-        label: `${partNumber} YTD Accumulated`,
+        label: `${partNumber} Accumulated`,
         color: palette[index % palette.length],
       };
     });
@@ -1020,7 +1027,7 @@ export default function Dashboard() {
                         key={cumulativeKey}
                         type="monotone"
                         dataKey={cumulativeKey}
-                        name={`${partNumber} YTD Accumulated`}
+                        name={`${partNumber} Accumulated`}
                         yAxisId="cumulative"
                         stroke={`var(--color-part${index + 1})`}
                         strokeWidth={2.25}
