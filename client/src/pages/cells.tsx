@@ -175,7 +175,15 @@ export default function CellsPage() {
   );
 
   const availableMachines = useMemo(
-    () => allMachines.filter((machine) => !assignedMachineIds.has(machine.id)),
+    () =>
+      allMachines
+        .filter((machine) => !assignedMachineIds.has(machine.id))
+        .sort((a, b) => {
+          const cellA = a.cell || "";
+          const cellB = b.cell || "";
+          if (cellA !== cellB) return cellA.localeCompare(cellB, undefined, { numeric: true, sensitivity: "base" });
+          return a.machineId.localeCompare(b.machineId, undefined, { numeric: true, sensitivity: "base" });
+        }),
     [allMachines, assignedMachineIds],
   );
 
@@ -626,7 +634,7 @@ export default function CellsPage() {
                             <option value="">Select machine</option>
                             {availableMachines.map((machine) => (
                               <option key={machine.id} value={machine.id}>
-                                {machine.name} ({machine.machineId})
+                                {machine.name} ({machine.machineId}){machine.cell ? ` — ${machine.cell}` : ""}
                               </option>
                             ))}
                           </select>
