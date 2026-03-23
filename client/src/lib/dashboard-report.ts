@@ -518,18 +518,24 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
   doc.text(`Generated ${generatedAt.toLocaleString()}`, marginX, 60);
   doc.text("Includes dashboard status, master data, and scrap history.", marginX, 74);
 
+  // Two-column layout: Metrics + Totals on left, Machine Status + Top Incidents on right
+  const colStartY = 94;
+  const leftColWidth = 340;
+  const rightColX = marginX + leftColWidth + 16;
+
+  // === LEFT COLUMN ===
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
   doc.setTextColor(15, 23, 42);
-  doc.text("Scrap Trend Metrics", marginX, 102);
+  doc.text("Scrap Trend Metrics", marginX, colStartY);
 
   autoTable(doc, {
-    startY: 110,
+    startY: colStartY + 8,
     theme: "grid",
-    styles: { fontSize: 9, cellPadding: 6, overflow: "linebreak" },
+    styles: { fontSize: 9, cellPadding: 5, overflow: "linebreak" },
     headStyles: { fillColor: [30, 41, 59], textColor: 255 },
-    margin: { left: marginX, right: marginX },
-    tableWidth: 420,
+    margin: { left: marginX, right: pageWidth - marginX - leftColWidth },
+    tableWidth: leftColWidth,
     head: [["Period", "Incidents", "Scrap Qty", "Scrap Cost"]],
     body: [
       ["This Week", safeText(timeRangeMetrics.week.incidentCount), safeText(timeRangeMetrics.week.totalQuantity), formatCurrency(timeRangeMetrics.week.totalCost)],
@@ -538,21 +544,21 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
     ],
   });
 
-  const metricsTableBottom = (doc as any).lastAutoTable?.finalY ?? 110;
+  const metricsTableBottom = (doc as any).lastAutoTable?.finalY ?? (colStartY + 8);
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
   doc.setTextColor(15, 23, 42);
-  doc.text("Totals", marginX, metricsTableBottom + 18);
+  doc.text("Totals", marginX, metricsTableBottom + 14);
 
   autoTable(doc, {
-    startY: metricsTableBottom + 24,
+    startY: metricsTableBottom + 22,
     theme: "grid",
-    styles: { fontSize: 9, cellPadding: 6, overflow: "linebreak" },
+    styles: { fontSize: 9, cellPadding: 5, overflow: "linebreak" },
     headStyles: { fillColor: [30, 41, 59], textColor: 255 },
-    margin: { left: marginX, right: marginX },
-    tableWidth: 420,
-    head: [["Total Metric", "Value"]],
+    margin: { left: marginX, right: pageWidth - marginX - leftColWidth },
+    tableWidth: leftColWidth,
+    head: [["Metric", "Value"]],
     body: [
       ["Machines", safeText(machines.length)],
       ["Configured Cells", safeText(cells.length)],
@@ -567,39 +573,48 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
     ],
   });
 
-  const totalsTableBottom = (doc as any).lastAutoTable?.finalY ?? (metricsTableBottom + 24);
+  // === RIGHT COLUMN ===
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(15, 23, 42);
+  doc.text("Machine Status", rightColX, colStartY);
 
   autoTable(doc, {
-    startY: totalsTableBottom + 16,
+    startY: colStartY + 8,
     theme: "grid",
-    styles: { fontSize: 9, cellPadding: 6, overflow: "linebreak" },
+    styles: { fontSize: 9, cellPadding: 5, overflow: "linebreak" },
     headStyles: { fillColor: [30, 41, 59], textColor: 255 },
-    margin: { left: marginX, right: marginX },
-    head: [["Status Snapshot", "Count"]],
+    margin: { left: rightColX, right: marginX },
+    head: [["Status", "Count"]],
     body: [
       ["Running", statusCounts.running],
       ["Idle", statusCounts.idle],
       ["Setup", statusCounts.setup],
       ["Maintenance", statusCounts.maintenance],
       ["Down", statusCounts.down],
-      ["Machines with Cycle Time", machinesWithCycleTime],
+      ["With Cycle Time", machinesWithCycleTime],
     ],
-    tableWidth: 260,
   });
+
+  const statusTableBottom = (doc as any).lastAutoTable?.finalY ?? (colStartY + 8);
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
   doc.setTextColor(15, 23, 42);
-  doc.text("Top Scrap Incidents", 330, totalsTableBottom + 24);
+  doc.text("Top Scrap Incidents", rightColX, statusTableBottom + 14);
 
   autoTable(doc, {
-    startY: totalsTableBottom + 34,
+    startY: statusTableBottom + 22,
     theme: "striped",
-    styles: { fontSize: 8, cellPadding: 5, overflow: "linebreak" },
+    styles: { fontSize: 8, cellPadding: 4, overflow: "linebreak" },
     headStyles: { fillColor: [190, 24, 93], textColor: 255 },
-    margin: { left: 330, right: marginX },
-    tableWidth: "auto",
-    head: [["Rank", "Machine", "Part", "Characteristic", "Qty", "Cost"]],
+    margin: { left: rightColX, right: marginX },
+    head: [["#", "Machine", "Part", "Characteristic", "Qty", "Cost"]],
+    columnStyles: {
+      0: { cellWidth: 22 },
+      4: { cellWidth: 32 },
+      5: { cellWidth: 62 },
+    },
     body: topIncidents.length > 0
       ? topIncidents.map((incident, index) => {
           const machine = machineById.get(incident.machineId);
