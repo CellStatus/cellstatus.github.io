@@ -114,6 +114,12 @@ type TimeRangeMetrics = {
 
 type TrendGranularity = "day" | "week" | "month";
 
+type TrendChartSelection = {
+  periodKey: string;
+  periodLabel: string;
+  partNumber?: string;
+};
+
 export default function Dashboard() {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
@@ -126,6 +132,7 @@ export default function Dashboard() {
   const [isExportingReport, setIsExportingReport] = useState(false);
   const [trendGranularity, setTrendGranularity] = useState<TrendGranularity>("day");
   const [trendStartIndex, setTrendStartIndex] = useState(0);
+  const [trendChartSelection, setTrendChartSelection] = useState<TrendChartSelection | null>(null);
 
   // Fetch machines
   const { data: machines = [], isLoading: machinesLoading } = useQuery<Machine[]>({
@@ -338,6 +345,12 @@ export default function Dashboard() {
     (parts || []).forEach((part) => map.set(part.id, part));
     return map;
   }, [parts]);
+
+  const machineById = useMemo(() => {
+    const map = new Map<string, Machine>();
+    (machines || []).forEach((machine) => map.set(machine.id, machine));
+    return map;
+  }, [machines]);
 
   const incidentsWithCost = useMemo<CostliestIncident[]>(() => {
     return (dashboardIncidents || [])
@@ -632,6 +645,7 @@ export default function Dashboard() {
     const chartData = visiblePeriods.map((period) => {
       const row: Record<string, string | number> = {
         period: period.label,
+        periodKey: period.key,
         other: 0,
       };
 
@@ -718,8 +732,68 @@ export default function Dashboard() {
       selectedStartLabel: visiblePeriods[0]?.label || "-",
       selectedEndLabel: visiblePeriods[visiblePeriods.length - 1]?.label || "-",
       periodCount: visiblePeriods.length,
+      periodKeyByLabel: new Map(visiblePeriods.map((period) => [period.label, period.key])),
     };
   }, [dashboardIncidents, partById, parts, trendGranularity, trendStartIndex]);
+
+  const selectedTrendIncidents = useMemo(() => {
+    if (!trendChartSelection) return [];
+
+    const startOfDay = (date: Date) =>
+      new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const startOfWeek = (date: Date) => {
+      const day = (date.getDay() + 6) % 7;
+      const monday = new Date(date);
+      monday.setDate(date.getDate() - day);
+      return startOfDay(monday);
+    };
+    const startOfMonth = (date: Date) =>
+      new Date(date.getFullYear(), date.getMonth(), 1);
+    const getPeriodStart = (date: Date) => {
+      if (trendGranularity === "day") return startOfDay(date);
+      if (trendGranularity === "week") return startOfWeek(date);
+      return startOfMonth(date);
+    };
+    const toIsoDate = (date: Date) => {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, "0");
+      const d = String(date.getDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    };
+
+    return dashboardIncidents
+      .filter((incident) => {
+        const rawDate = incident.dateCreated || incident.createdAt || incident.updatedAt;
+        if (!rawDate) return false;
+        const parsedDate = new Date(rawDate);
+        if (Number.isNaN(parsedDate.getTime())) return false;
+        const periodKey = toIsoDate(getPeriodStart(parsedDate));
+        if (periodKey !== trendChartSelection.periodKey) return false;
+        if (!trendChartSelection.partNumber) return true;
+        const incidentPartNumber = incident.partId ? (partById.get(incident.partId)?.partNumber || "Unknown Part") : "Unassigned";
+        return incidentPartNumber === trendChartSelection.partNumber;
+      })
+      .map((incident) => {
+        const machine = machineById.get(incident.machineId);
+        const part = incident.partId ? partById.get(incident.partId) : null;
+        const dateRaw = incident.dateCreated || incident.createdAt || incident.updatedAt || null;
+        return {
+          id: incident.id,
+          machineName: machine?.name || machine?.machineId || incident.machineId,
+          partLabel: part?.partName ? `${part.partNumber} — ${part.partName}` : (part?.partNumber || "Unassigned"),
+          characteristic: incident.characteristic,
+          quantity: incident.quantity,
+          estimatedCost: Number(incident.estimatedCost || 0),
+          dateRaw,
+        };
+      })
+      .sort((left, right) => {
+        const leftDate = left.dateRaw ? new Date(left.dateRaw).getTime() : 0;
+        const rightDate = right.dateRaw ? new Date(right.dateRaw).getTime() : 0;
+        if (rightDate !== leftDate) return rightDate - leftDate;
+        return right.estimatedCost - left.estimatedCost;
+      });
+  }, [dashboardIncidents, machineById, partById, trendChartSelection, trendGranularity]);
 
   const totalScrapCost = useMemo(() => {
     return incidentsWithCost.reduce((sum, incident) => sum + incident.incidentCost, 0);
@@ -968,7 +1042,7 @@ export default function Dashboard() {
         <div>
           <h2 className="text-lg font-semibold mb-4">Weekly / Monthly / Yearly Scrap Metrics</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Card>
+            <Card {...clickableCardProps(() => goToSpcData({ range: "week" }))}>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">This Week</CardTitle>
               </CardHeader>
@@ -979,7 +1053,7 @@ export default function Dashboard() {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card {...clickableCardProps(() => goToSpcData({ range: "month" }))}>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">This Month</CardTitle>
               </CardHeader>
@@ -990,7 +1064,7 @@ export default function Dashboard() {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card {...clickableCardProps(() => goToSpcData({ range: "year" }))}>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">This Year</CardTitle>
               </CardHeader>
@@ -1104,9 +1178,29 @@ export default function Dashboard() {
                       fill={`var(--color-part${index + 1})`}
                       yAxisId="monthly"
                       radius={[4, 4, 0, 0]}
+                      onClick={(state: any) => {
+                        const periodKey = state?.payload?.periodKey;
+                        const periodLabel = state?.payload?.period;
+                        if (!periodKey || !periodLabel) return;
+                        setTrendChartSelection({ periodKey, periodLabel, partNumber });
+                      }}
                     />
                   ))}
-                  {scrapCostTrendChart.hasOther ? <Bar dataKey="other" name={`Other Parts ${scrapCostTrendChart.periodLabel}`} fill="var(--color-other)" yAxisId="monthly" radius={[4, 4, 0, 0]} /> : null}
+                  {scrapCostTrendChart.hasOther ? (
+                    <Bar
+                      dataKey="other"
+                      name={`Other Parts ${scrapCostTrendChart.periodLabel}`}
+                      fill="var(--color-other)"
+                      yAxisId="monthly"
+                      radius={[4, 4, 0, 0]}
+                      onClick={(state: any) => {
+                        const periodKey = state?.payload?.periodKey;
+                        const periodLabel = state?.payload?.period;
+                        if (!periodKey || !periodLabel) return;
+                        setTrendChartSelection({ periodKey, periodLabel });
+                      }}
+                    />
+                  ) : null}
                   {scrapCostTrendChart.topPartNumbers.map((partNumber, index) => {
                     const cumulativeKey = scrapCostTrendChart.cumulativeKeyByNumber.get(partNumber);
                     if (!cumulativeKey) return null;
@@ -1122,6 +1216,12 @@ export default function Dashboard() {
                         dot={{ r: 2 }}
                         activeDot={{ r: 4 }}
                         connectNulls={false}
+                        onClick={(state: any) => {
+                          const periodKey = state?.payload?.periodKey;
+                          const periodLabel = state?.payload?.period;
+                          if (!periodKey || !periodLabel) return;
+                          setTrendChartSelection({ periodKey, periodLabel, partNumber });
+                        }}
                       />
                     );
                   })}
@@ -1139,6 +1239,52 @@ export default function Dashboard() {
               <p className="mt-2 text-xs text-muted-foreground">
                 Bars show {trendGranularity} scrap cost by part number (side by side). Lines show accumulated scrap cost on the right axis within the selected timeframe only.
               </p>
+              <div className="mt-4 border rounded-md p-3 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-sm font-medium">
+                    Selected Incidents from Chart
+                    {trendChartSelection && (
+                      <span className="text-muted-foreground font-normal">
+                        {` — ${trendChartSelection.periodLabel}`}
+                        {trendChartSelection.partNumber ? ` (${trendChartSelection.partNumber})` : ""}
+                      </span>
+                    )}
+                  </div>
+                  {trendChartSelection && (
+                    <Button variant="ghost" size="sm" onClick={() => setTrendChartSelection(null)}>
+                      Clear Selection
+                    </Button>
+                  )}
+                </div>
+                {!trendChartSelection ? (
+                  <p className="text-xs text-muted-foreground">Click a bar or line point in the chart to select individual incidents for that period.</p>
+                ) : selectedTrendIncidents.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No incidents match this chart selection.</p>
+                ) : (
+                  <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
+                    {selectedTrendIncidents.map((incident) => (
+                      <button
+                        key={incident.id}
+                        type="button"
+                        onClick={() => setLocation(`/spc-data?incidentId=${encodeURIComponent(incident.id)}`)}
+                        className="w-full rounded border px-2 py-1.5 text-left hover:bg-muted"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="text-sm truncate">{incident.machineName}</div>
+                            <div className="text-xs text-muted-foreground truncate">{incident.partLabel}</div>
+                            <div className="text-xs text-muted-foreground truncate">Char #{incident.characteristic}</div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className="text-sm font-semibold text-rose-600">${incident.estimatedCost.toLocaleString()}</div>
+                            <div className="text-xs text-muted-foreground">{incident.quantity} pcs</div>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
         </div>

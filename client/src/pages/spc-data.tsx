@@ -33,6 +33,8 @@ type IncidentForm = {
   dateClosed: string;
 };
 
+type DateRangeFilter = "week" | "month" | "year";
+
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
 const emptyForm: IncidentForm = {
@@ -52,6 +54,7 @@ export default function SpcData() {
   const [search, setSearch] = useState("");
   const [filterMachineId, setFilterMachineId] = useState<string | null>(null);
   const [filterCellName, setFilterCellName] = useState<string | null>(null);
+  const [filterRange, setFilterRange] = useState<DateRangeFilter | null>(null);
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<IncidentForm>(emptyForm);
@@ -88,6 +91,7 @@ export default function SpcData() {
       const cell = u.searchParams.get("cell");
       const char = u.searchParams.get("char");
       const incidentId = u.searchParams.get("incidentId");
+      const range = u.searchParams.get("range");
       if (machineId) {
         setForm((prev) => ({ ...prev, machineId }));
         setFilterMachineId(machineId);
@@ -97,6 +101,9 @@ export default function SpcData() {
       }
       if (char) setSearch(char);
       if (incidentId) setPendingOpenIncidentId(incidentId);
+      if (range === "week" || range === "month" || range === "year") {
+        setFilterRange(range);
+      }
     } catch {
       // ignore URL parsing errors
     }
@@ -131,12 +138,34 @@ export default function SpcData() {
   }, [characteristics, form.partId]);
 
   const rows = useMemo(() => {
+    const getRangeStartDate = (range: DateRangeFilter) => {
+      const now = new Date();
+      if (range === "week") {
+        const startOfWeek = new Date(now);
+        const dayOffset = (startOfWeek.getDay() + 6) % 7;
+        startOfWeek.setDate(startOfWeek.getDate() - dayOffset);
+        startOfWeek.setHours(0, 0, 0, 0);
+        return startOfWeek;
+      }
+      if (range === "month") {
+        return new Date(now.getFullYear(), now.getMonth(), 1);
+      }
+      return new Date(now.getFullYear(), 0, 1);
+    };
+
     return incidents
       .filter((incident) => {
         if (filterMachineId && incident.machineId !== filterMachineId) return false;
         if (filterCellName) {
           const machineCell = machineById.get(incident.machineId)?.cell || "Unassigned";
           if (machineCell !== filterCellName) return false;
+        }
+        if (filterRange) {
+          const createdRaw = incident.dateCreated || incident.createdAt;
+          if (!createdRaw) return false;
+          const createdDate = new Date(createdRaw);
+          if (Number.isNaN(createdDate.getTime())) return false;
+          if (createdDate < getRangeStartDate(filterRange)) return false;
         }
         if (!search.trim()) return true;
         const machineLabel = machineById.get(incident.machineId)?.machineId || machineById.get(incident.machineId)?.name || "";
@@ -151,7 +180,7 @@ export default function SpcData() {
         const createdDate = (incident: typeof left) => incident.dateCreated || incident.createdAt || "";
         return createdDate(right).localeCompare(createdDate(left));
       });
-  }, [incidents, machineById, partById, search, filterMachineId, filterCellName]);
+  }, [incidents, machineById, partById, search, filterMachineId, filterCellName, filterRange]);
 
   const characteristicLabel = (char: Characteristic) =>
     char.charName ? `${char.charNumber} – ${char.charName}` : char.charNumber;
@@ -306,6 +335,7 @@ export default function SpcData() {
   const clearFilters = () => {
     setFilterMachineId(null);
     setFilterCellName(null);
+    setFilterRange(null);
     try {
       window.history.replaceState({}, "", "/spc-data");
     } catch {
@@ -318,7 +348,7 @@ export default function SpcData() {
       <div>
         <h2 className="text-lg font-semibold">Scrap Incidents</h2>
         <p className="text-sm text-muted-foreground">Track incidents by machine, characteristic, quantity, and estimated cost.</p>
-        {(filterMachineId || filterCellName) && (
+        {(filterMachineId || filterCellName || filterRange) && (
           <div className="text-sm text-muted-foreground mt-1">
             {filterMachineId && (
               <span>
@@ -327,6 +357,12 @@ export default function SpcData() {
             )}
             {filterMachineId && filterCellName && <span className="mx-2">|</span>}
             {filterCellName && <span>Filtering by cell: {filterCellName}</span>}
+            {(filterMachineId || filterCellName) && filterRange && <span className="mx-2">|</span>}
+            {filterRange && (
+              <span>
+                Filtering by range: This {filterRange === "week" ? "Week" : filterRange === "month" ? "Month" : "Year"}
+              </span>
+            )}
             <Button
               variant="ghost"
               size="sm"
