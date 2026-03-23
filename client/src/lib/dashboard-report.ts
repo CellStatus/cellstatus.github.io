@@ -243,6 +243,171 @@ const getPartTrendByGranularity = (
   };
 };
 
+const getReportTrendFullHistory = (
+  scrapIncidents: ScrapIncident[],
+  partById: Map<string, Part>,
+) => {
+  const startOfMonth = (date: Date) =>
+    new Date(date.getFullYear(), date.getMonth(), 1);
+  const toIsoDate = (date: Date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  };
+  const formatPeriodLabel = (date: Date) =>
+    date.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
+
+  const datedIncidents = scrapIncidents
+    .map((incident) => ({ incident, date: parseIncidentDate(incident) }))
+    .filter((entry): entry is { incident: ScrapIncident; date: Date } => Boolean(entry.date))
+    .sort((left, right) => left.date.getTime() - right.date.getTime());
+
+  const nowMonth = startOfMonth(new Date());
+  const firstMonth = datedIncidents.length > 0
+    ? startOfMonth(datedIncidents[0].date)
+    : nowMonth;
+  const lastMonth = datedIncidents.length > 0
+    ? startOfMonth(datedIncidents[datedIncidents.length - 1].date)
+    : nowMonth;
+
+  const periods: Array<{ key: string; label: string }> = [];
+  const cursor = new Date(firstMonth);
+  while (cursor <= lastMonth) {
+    periods.push({
+      key: toIsoDate(cursor),
+      label: formatPeriodLabel(cursor),
+    });
+    cursor.setMonth(cursor.getMonth() + 1, 1);
+  }
+
+  const periodPartTotals = new Map<string, Map<string, number>>();
+  const partTotals = new Map<string, number>();
+
+  datedIncidents.forEach(({ incident, date }) => {
+    const periodKey = toIsoDate(startOfMonth(date));
+    const partNumber = incident.partId ? (partById.get(incident.partId)?.partNumber || "Unknown Part") : "Unassigned";
+    const incidentCost = Number(incident.estimatedCost || 0);
+
+    partTotals.set(partNumber, (partTotals.get(partNumber) || 0) + incidentCost);
+
+    if (!periodPartTotals.has(periodKey)) {
+      periodPartTotals.set(periodKey, new Map());
+    }
+    const partCostMap = periodPartTotals.get(periodKey)!;
+    partCostMap.set(partNumber, (partCostMap.get(partNumber) || 0) + incidentCost);
+  });
+
+  const topPartNumbers = Array.from(partTotals.entries())
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 5)
+    .map(([partNumber]) => partNumber);
+
+  const hasOther = Array.from(periodPartTotals.values()).some((partCostMap) =>
+    Array.from(partCostMap.keys()).some((partNumber) => !topPartNumbers.includes(partNumber)),
+  );
+  const categoryKeys = hasOther ? [...topPartNumbers, "Other Parts"] : [...topPartNumbers];
+  const cumulativeRunningTotals = new Map<string, number>();
+
+  const points: TrendPoint[] = periods.map((period) => {
+    const periodValues: Record<string, number> = {};
+    const cumulativeValues: Record<string, number | null> = {};
+    categoryKeys.forEach((key) => {
+      periodValues[key] = 0;
+    });
+    topPartNumbers.forEach((partNumber) => {
+      cumulativeValues[partNumber] = null;
+    });
+
+    const partCostMap = periodPartTotals.get(period.key);
+    if (partCostMap) {
+      partCostMap.forEach((cost, partNumber) => {
+        if (topPartNumbers.includes(partNumber)) {
+          periodValues[partNumber] = cost;
+        } else {
+          periodValues["Other Parts"] += cost;
+        }
+      });
+    }
+
+    topPartNumbers.forEach((partNumber) => {
+      const nextValue = (cumulativeRunningTotals.get(partNumber) || 0) + Number(periodValues[partNumber] || 0);
+      cumulativeRunningTotals.set(partNumber, nextValue);
+      cumulativeValues[partNumber] = nextValue;
+    });
+
+    const maxPeriodValue = categoryKeys.reduce((max, key) => Math.max(max, Number(periodValues[key] || 0)), 0);
+
+    return {
+      period: period.label,
+      periodValues,
+      cumulativeValues,
+      maxPeriodValue,
+    };
+  });
+
+  return {
+    points,
+    categories: categoryKeys,
+    lineCategories: topPartNumbers,
+  };
+};
+
+const renderPagedTableSection = (
+  doc: jsPDF,
+  options: {
+    title: string;
+    titleColor: [number, number, number];
+    head: string[][];
+    body: Array<Array<string | number>>;
+    rowsPerPage: number;
+    marginX: number;
+    theme?: "striped" | "grid" | "plain";
+    styles?: Record<string, unknown>;
+    headStyles?: Record<string, unknown>;
+  },
+) => {
+  const {
+    title,
+    titleColor,
+    head,
+    body,
+    rowsPerPage,
+    marginX,
+    theme = "striped",
+    styles = {},
+    headStyles = {},
+  } = options;
+
+  const effectiveBody = body.length > 0 ? body : [["-"]];
+  const chunks: Array<Array<Array<string | number>>> = [];
+  for (let i = 0; i < effectiveBody.length; i += rowsPerPage) {
+    chunks.push(effectiveBody.slice(i, i + rowsPerPage));
+  }
+
+  chunks.forEach((chunk, index) => {
+    doc.addPage();
+    const pageTitle = chunks.length > 1 ? `${title} (${index + 1}/${chunks.length})` : title;
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(titleColor[0], titleColor[1], titleColor[2]);
+    doc.setFontSize(16);
+    doc.text(pageTitle, marginX, 40);
+
+    autoTable(doc, {
+      startY: 56,
+      theme,
+      styles: { fontSize: 8, cellPadding: 4, overflow: "ellipsize", valign: "top", ...styles },
+      headStyles,
+      margin: { left: marginX, right: marginX },
+      tableWidth: "auto",
+      head,
+      body: chunk,
+      rowPageBreak: "avoid",
+      pageBreak: "avoid",
+    });
+  });
+};
+
 const drawStackedBarChart = (
   doc: jsPDF,
   options: {
@@ -463,7 +628,6 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
     parts,
     characteristics,
     scrapIncidents,
-    chartGranularity = "day",
   } = data;
   const generatedAt = new Date();
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
@@ -474,7 +638,7 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
   const partById = new Map(parts.map((part) => [part.id, part]));
   const machineById = new Map(machines.map((machine) => [machine.id, machine]));
   const timeRangeMetrics = getTimeRangeMetrics(scrapIncidents);
-  const trend = getPartTrendByGranularity(scrapIncidents, partById, chartGranularity);
+  const trend = getReportTrendFullHistory(scrapIncidents, partById);
   const statusCounts = getMachineStatusCounts(machines);
   const openIncidents = scrapIncidents.filter((incident) => incident.status !== "closed");
   const totalIncidentCost = scrapIncidents.reduce((sum, incident) => sum + Number(incident.estimatedCost || 0), 0);
@@ -644,11 +808,7 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
   doc.setTextColor(15, 23, 42);
-  doc.text(
-    `${chartGranularity === "day" ? "Daily (Last 14 Days)" : chartGranularity === "week" ? "Weekly (Last 12 Weeks)" : "Monthly (Last 12 Months)"} Scrap Cost by Part with Current-Year Accumulated Trendlines`,
-    marginX,
-    74,
-  );
+  doc.text("Monthly Scrap Cost by Part with All-Incident Accumulated Trendlines (Full History)", marginX, 74);
 
   drawStackedBarChart(doc, {
     x: marginX,
@@ -660,19 +820,14 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
     lineCategories: trend.lineCategories,
   });
 
-  doc.addPage();
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(15, 23, 42);
-  doc.setFontSize(16);
-  doc.text("Configured Cells", marginX, 40);
-
-  autoTable(doc, {
-    startY: 56,
+  renderPagedTableSection(doc, {
+    title: "Configured Cells",
+    titleColor: [15, 23, 42],
+    marginX,
+    rowsPerPage: 10,
     theme: "striped",
-    styles: { fontSize: 8, cellPadding: 5, overflow: "linebreak", valign: "top" },
     headStyles: { fillColor: [14, 116, 144], textColor: 255 },
-    margin: { left: marginX, right: marginX },
-    tableWidth: "auto",
+    styles: { fontSize: 8, cellPadding: 4 },
     head: [["Cell", "Cell Number", "Description", "Operations", "Bottleneck", "Machines", "Running", "Down", "UPH", "WIP", "Notes"]],
     body: cellMachineSummary.length > 0
       ? cellMachineSummary.map((cell) => [
@@ -691,19 +846,14 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
       : [["No configured cells", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-"]],
   });
 
-  doc.addPage();
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(15, 23, 42);
-  doc.setFontSize(16);
-  doc.text("Machines", marginX, 40);
-
-  autoTable(doc, {
-    startY: 56,
+  renderPagedTableSection(doc, {
+    title: "Machines",
+    titleColor: [15, 23, 42],
+    marginX,
+    rowsPerPage: 13,
     theme: "striped",
-    styles: { fontSize: 8, cellPadding: 5, overflow: "linebreak", valign: "top" },
     headStyles: { fillColor: [22, 163, 74], textColor: 255 },
-    margin: { left: marginX, right: marginX },
-    tableWidth: "auto",
+    styles: { fontSize: 8, cellPadding: 4 },
     head: [["Machine ID", "Name", "Cell", "Status", "Cycle Time (s)", "Uptime %", "Batch Size", "Setup Time", "Status Note"]],
     body: machines.length > 0
       ? machines.map((machine) => [
@@ -720,19 +870,14 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
       : [["No machines", "-", "-", "-", "-", "-", "-", "-", "-"]],
   });
 
-  doc.addPage();
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(15, 23, 42);
-  doc.setFontSize(16);
-  doc.text("Parts", marginX, 40);
-
-  autoTable(doc, {
-    startY: 56,
+  renderPagedTableSection(doc, {
+    title: "Parts",
+    titleColor: [15, 23, 42],
+    marginX,
+    rowsPerPage: 16,
     theme: "striped",
-    styles: { fontSize: 8, cellPadding: 5, overflow: "linebreak", valign: "top" },
     headStyles: { fillColor: [202, 138, 4], textColor: 255 },
-    margin: { left: marginX, right: marginX },
-    tableWidth: "auto",
+    styles: { fontSize: 8, cellPadding: 4 },
     head: [["Part Number", "Part Name", "Material", "Raw Material Cost", "Notes"]],
     body: parts.length > 0
       ? parts.map((part) => [
@@ -745,19 +890,14 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
       : [["No parts", "-", "-", "-", "-"]],
   });
 
-  doc.addPage();
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(15, 23, 42);
-  doc.setFontSize(16);
-  doc.text("Characteristics", marginX, 40);
-
-  autoTable(doc, {
-    startY: 56,
+  renderPagedTableSection(doc, {
+    title: "Characteristics",
+    titleColor: [15, 23, 42],
+    marginX,
+    rowsPerPage: 13,
     theme: "striped",
-    styles: { fontSize: 8, cellPadding: 5, overflow: "linebreak", valign: "top" },
     headStyles: { fillColor: [124, 58, 237], textColor: 255 },
-    margin: { left: marginX, right: marginX },
-    tableWidth: "auto",
+    styles: { fontSize: 8, cellPadding: 4 },
     head: [["Part Number", "Characteristic No.", "Name", "Nominal", "Min", "Max", "Tolerance", "Operation"]],
     body: characteristics.length > 0
       ? characteristics.map((characteristic) => [
@@ -773,19 +913,14 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
       : [["No characteristics", "-", "-", "-", "-", "-", "-", "-"]],
   });
 
-  doc.addPage();
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(15, 23, 42);
-  doc.setFontSize(16);
-  doc.text("Scrap Incidents", marginX, 40);
-
-  autoTable(doc, {
-    startY: 56,
+  renderPagedTableSection(doc, {
+    title: "Scrap Incidents",
+    titleColor: [15, 23, 42],
+    marginX,
+    rowsPerPage: 14,
     theme: "striped",
-    styles: { fontSize: 7, cellPadding: 4, overflow: "linebreak", valign: "top" },
     headStyles: { fillColor: [190, 24, 93], textColor: 255 },
-    margin: { left: marginX, right: marginX },
-    tableWidth: "auto",
+    styles: { fontSize: 7, cellPadding: 3 },
     head: [["Status", "Machine", "Cell", "Part", "Characteristic", "Qty", "Cost", "Created", "Closed", "Note"]],
     body: scrapIncidents.length > 0
       ? scrapIncidents.map((incident) => {
