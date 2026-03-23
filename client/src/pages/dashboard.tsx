@@ -9,6 +9,12 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   ChartContainer,
   ChartTooltip,
   ChartTooltipContent,
@@ -41,7 +47,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { exportDashboardStatusPdf } from "@/lib/dashboard-report";
+import { exportDashboardStatusExcel, exportDashboardStatusPdf } from "@/lib/dashboard-report";
 import { 
   Search,
   Factory,
@@ -741,7 +747,7 @@ export default function Dashboard() {
     setDeleteConfirmOpen(true);
   };
 
-  const handleExportReport = async () => {
+  const handleExportPdf = async () => {
     try {
       setIsExportingReport(true);
       exportDashboardStatusPdf({
@@ -757,6 +763,29 @@ export default function Dashboard() {
       console.error("Failed to generate dashboard PDF report", error);
       toast({
         title: "Failed to generate PDF report",
+        variant: "destructive",
+      });
+    } finally {
+      setIsExportingReport(false);
+    }
+  };
+
+  const handleExportExcel = async () => {
+    try {
+      setIsExportingReport(true);
+      exportDashboardStatusExcel({
+        machines,
+        cells,
+        parts,
+        characteristics,
+        scrapIncidents,
+        chartGranularity: trendGranularity,
+      });
+      toast({ title: "Excel report generated" });
+    } catch (error) {
+      console.error("Failed to generate dashboard Excel report", error);
+      toast({
+        title: "Failed to generate Excel report",
         variant: "destructive",
       });
     } finally {
@@ -1353,14 +1382,22 @@ export default function Dashboard() {
         </div>
 
         <div className="flex justify-end pt-2">
-          <Button
-            variant="outline"
-            onClick={handleExportReport}
-            disabled={reportLoading || isExportingReport}
-          >
-            <FileDown className="mr-2 h-4 w-4" />
-            {isExportingReport ? "Generating PDF..." : "Export PDF Report"}
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" disabled={reportLoading || isExportingReport}>
+                <FileDown className="mr-2 h-4 w-4" />
+                {isExportingReport ? "Generating Report..." : "Export Report"}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={handleExportPdf} disabled={reportLoading || isExportingReport}>
+                Export PDF
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleExportExcel} disabled={reportLoading || isExportingReport}>
+                Export Excel
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
         </>
         )}

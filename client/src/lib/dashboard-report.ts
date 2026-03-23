@@ -1,5 +1,6 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import * as XLSX from "xlsx";
 import type {
   CellConfiguration,
   Characteristic,
@@ -406,6 +407,17 @@ const renderPagedTableSection = (
       pageBreak: "avoid",
     });
   });
+};
+
+const appendSheetFromRows = (
+  workbook: XLSX.WorkBook,
+  sheetName: string,
+  headers: string[],
+  rows: Array<Array<string | number | null | undefined>>,
+) => {
+  const normalizedRows = rows.map((row) => row.map((value) => (value == null ? "" : value)));
+  const sheet = XLSX.utils.aoa_to_sheet([headers, ...normalizedRows]);
+  XLSX.utils.book_append_sheet(workbook, sheet, sheetName.slice(0, 31));
 };
 
 const drawStackedBarChart = (
@@ -953,4 +965,208 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
   }
 
   doc.save("Scrap Cost Analysis.pdf");
+}
+
+export function exportDashboardStatusExcel(data: DashboardReportData) {
+  const {
+    machines,
+    cells,
+    parts,
+    characteristics,
+    scrapIncidents,
+  } = data;
+
+  const partById = new Map(parts.map((part) => [part.id, part]));
+  const machineById = new Map(machines.map((machine) => [machine.id, machine]));
+  const timeRangeMetrics = getTimeRangeMetrics(scrapIncidents);
+  const trend = getReportTrendFullHistory(scrapIncidents, partById);
+  const statusCounts = getMachineStatusCounts(machines);
+  const openIncidents = scrapIncidents.filter((incident) => incident.status !== "closed");
+  const totalIncidentCost = scrapIncidents.reduce((sum, incident) => sum + Number(incident.estimatedCost || 0), 0);
+  const openIncidentCost = openIncidents.reduce((sum, incident) => sum + Number(incident.estimatedCost || 0), 0);
+  const totalScrapQuantity = scrapIncidents.reduce((sum, incident) => sum + Number(incident.quantity || 0), 0);
+  const openScrapQuantity = openIncidents.reduce((sum, incident) => sum + Number(incident.quantity || 0), 0);
+  const machinesWithCycleTime = machines.filter((machine) => (machine.idealCycleTime || 0) > 0).length;
+
+  const topIncidents = [...scrapIncidents]
+    .filter((incident) => Number(incident.estimatedCost || 0) > 0)
+    .sort((left, right) => Number(right.estimatedCost || 0) - Number(left.estimatedCost || 0))
+    .slice(0, 10);
+
+  const cellMachineSummary = cells.map((cell) => {
+    const cellMachines = machines.filter((machine) => machine.cell === cell.name);
+    const operationSummary = getCellOperationSummary(cell);
+    const bottleneck = getCellBottleneckSummary(cell, machineById);
+    return {
+      name: cell.name,
+      cellNumber: safeText(cell.status),
+      description: safeText(cell.description),
+      operationCount: operationSummary.count,
+      bottleneck,
+      machineCount: cellMachines.length,
+      runningCount: cellMachines.filter((machine) => machine.status === "running").length,
+      downCount: cellMachines.filter((machine) => machine.status === "down").length,
+      throughputUph: cell.throughputUph ?? null,
+      totalWip: cell.totalWip ?? null,
+      notes: safeText(cell.notes),
+    };
+  });
+
+  const workbook = XLSX.utils.book_new();
+
+  appendSheetFromRows(workbook, "Trend Metrics", ["Period", "Incidents", "Scrap Qty", "Scrap Cost"], [
+    ["This Week", timeRangeMetrics.week.incidentCount, timeRangeMetrics.week.totalQuantity, timeRangeMetrics.week.totalCost],
+    ["This Month", timeRangeMetrics.month.incidentCount, timeRangeMetrics.month.totalQuantity, timeRangeMetrics.month.totalCost],
+    ["This Year", timeRangeMetrics.year.incidentCount, timeRangeMetrics.year.totalQuantity, timeRangeMetrics.year.totalCost],
+  ]);
+
+  appendSheetFromRows(workbook, "Totals", ["Metric", "Value"], [
+    ["Machines", machines.length],
+    ["Configured Cells", cells.length],
+    ["Parts", parts.length],
+    ["Characteristics", characteristics.length],
+    ["Recorded Scrap Incidents", scrapIncidents.length],
+    ["Open Scrap Incidents", openIncidents.length],
+    ["Total Scrap Quantity", totalScrapQuantity],
+    ["Open Scrap Quantity", openScrapQuantity],
+    ["Total Scrap Cost", totalIncidentCost],
+    ["Open Scrap Cost", openIncidentCost],
+  ]);
+
+  appendSheetFromRows(workbook, "Machine Status", ["Status", "Count"], [
+    ["Running", statusCounts.running],
+    ["Idle", statusCounts.idle],
+    ["Setup", statusCounts.setup],
+    ["Maintenance", statusCounts.maintenance],
+    ["Down", statusCounts.down],
+    ["With Cycle Time", machinesWithCycleTime],
+  ]);
+
+  appendSheetFromRows(workbook, "Top Scrap Incidents", ["Rank", "Machine", "Part", "Characteristic", "Qty", "Cost"],
+    topIncidents.length > 0
+      ? topIncidents.map((incident, index) => {
+          const machine = machineById.get(incident.machineId);
+          const part = incident.partId ? partById.get(incident.partId) : undefined;
+          return [
+            `#${index + 1}`,
+            machine?.machineId || machine?.name || incident.machineId,
+            part?.partNumber || "-",
+            incident.characteristic,
+            Number(incident.quantity || 0),
+            Number(incident.estimatedCost || 0),
+          ];
+        })
+      : [["-", "-", "-", "No incidents", "-", "-"]],
+  );
+
+  const trendHeaders = [
+    "Period",
+    ...trend.categories.map((category) => `${category} Cost`),
+    ...trend.lineCategories.map((category) => `${category} Cumulative`),
+  ];
+  const trendRows = trend.points.map((point) => [
+    point.period,
+    ...trend.categories.map((category) => Number(point.periodValues[category] || 0)),
+    ...trend.lineCategories.map((category) => Number(point.cumulativeValues[category] || 0)),
+  ]);
+  appendSheetFromRows(workbook, "Trend Chart Data", trendHeaders, trendRows.length > 0 ? trendRows : [["No trend data"]]);
+
+  appendSheetFromRows(
+    workbook,
+    "Configured Cells",
+    ["Cell", "Cell Number", "Description", "Operations", "Bottleneck", "Machines", "Running", "Down", "UPH", "WIP", "Notes"],
+    cellMachineSummary.length > 0
+      ? cellMachineSummary.map((cell) => [
+          cell.name,
+          cell.cellNumber,
+          cell.description,
+          cell.operationCount,
+          cell.bottleneck,
+          cell.machineCount,
+          cell.runningCount,
+          cell.downCount,
+          cell.throughputUph,
+          cell.totalWip,
+          cell.notes,
+        ])
+      : [["No configured cells", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-"]],
+  );
+
+  appendSheetFromRows(
+    workbook,
+    "Machines",
+    ["Machine ID", "Name", "Cell", "Status", "Cycle Time (s)", "Uptime %", "Batch Size", "Setup Time", "Status Note"],
+    machines.length > 0
+      ? machines.map((machine) => [
+          machine.machineId,
+          machine.name,
+          machine.cell,
+          machine.status,
+          machine.idealCycleTime,
+          machine.uptimePercent,
+          machine.batchSize,
+          machine.setupTime,
+          machine.statusUpdate,
+        ])
+      : [["No machines", "-", "-", "-", "-", "-", "-", "-", "-"]],
+  );
+
+  appendSheetFromRows(
+    workbook,
+    "Parts",
+    ["Part Number", "Part Name", "Material", "Raw Material Cost", "Notes"],
+    parts.length > 0
+      ? parts.map((part) => [
+          part.partNumber,
+          part.partName,
+          part.material,
+          part.rawMaterialCost,
+          part.notes,
+        ])
+      : [["No parts", "-", "-", "-", "-"]],
+  );
+
+  appendSheetFromRows(
+    workbook,
+    "Characteristics",
+    ["Part Number", "Characteristic No.", "Name", "Nominal", "Min", "Max", "Tolerance", "Operation"],
+    characteristics.length > 0
+      ? characteristics.map((characteristic) => [
+          characteristic.partId ? (partById.get(characteristic.partId)?.partNumber || "-") : "-",
+          characteristic.charNumber,
+          characteristic.charName,
+          characteristic.nominalValue,
+          characteristic.charMin,
+          characteristic.charMax,
+          characteristic.tolerance,
+          characteristic.opName,
+        ])
+      : [["No characteristics", "-", "-", "-", "-", "-", "-", "-"]],
+  );
+
+  appendSheetFromRows(
+    workbook,
+    "Scrap Incidents",
+    ["Status", "Machine", "Cell", "Part", "Characteristic", "Qty", "Cost", "Created", "Closed", "Note"],
+    scrapIncidents.length > 0
+      ? scrapIncidents.map((incident) => {
+          const machine = machineById.get(incident.machineId);
+          const part = incident.partId ? partById.get(incident.partId) : undefined;
+          return [
+            incident.status,
+            machine?.machineId || machine?.name || incident.machineId,
+            machine?.cell || "-",
+            part?.partNumber || "-",
+            incident.characteristic,
+            Number(incident.quantity || 0),
+            Number(incident.estimatedCost || 0),
+            incident.dateCreated || "-",
+            incident.dateClosed || "-",
+            incident.note || "-",
+          ];
+        })
+      : [["No incidents", "-", "-", "-", "-", "-", "-", "-", "-", "-"]],
+  );
+
+  XLSX.writeFile(workbook, "Scrap Cost Analysis.xlsx");
 }
