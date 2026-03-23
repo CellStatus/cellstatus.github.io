@@ -54,6 +54,8 @@ export default function SpcData() {
   const [search, setSearch] = useState("");
   const [filterMachineId, setFilterMachineId] = useState<string | null>(null);
   const [filterCellName, setFilterCellName] = useState<string | null>(null);
+  const [filterCharacteristic, setFilterCharacteristic] = useState<string | null>(null);
+  const [filterPartNumber, setFilterPartNumber] = useState<string | null>(null);
   const [filterRange, setFilterRange] = useState<DateRangeFilter | null>(null);
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -90,6 +92,8 @@ export default function SpcData() {
       const machineId = u.searchParams.get("machineId");
       const cell = u.searchParams.get("cell");
       const char = u.searchParams.get("char");
+      const characteristic = u.searchParams.get("characteristic");
+      const partNumber = u.searchParams.get("partNumber");
       const searchText = u.searchParams.get("search");
       const incidentId = u.searchParams.get("incidentId");
       const range = u.searchParams.get("range");
@@ -99,6 +103,14 @@ export default function SpcData() {
       }
       if (cell) {
         setFilterCellName(cell);
+      }
+      if (characteristic) {
+        setFilterCharacteristic(characteristic);
+      } else if (char) {
+        setFilterCharacteristic(char);
+      }
+      if (partNumber) {
+        setFilterPartNumber(partNumber);
       }
       if (searchText) {
         setSearch(searchText);
@@ -171,6 +183,13 @@ export default function SpcData() {
           const machineCell = machineById.get(incident.machineId)?.cell || "Unassigned";
           if (machineCell !== filterCellName) return false;
         }
+        if (filterCharacteristic) {
+          if ((incident.characteristic || "") !== filterCharacteristic) return false;
+        }
+        if (filterPartNumber) {
+          const incidentPartNumber = incident.partId ? (partById.get(incident.partId)?.partNumber || "") : "";
+          if (incidentPartNumber !== filterPartNumber) return false;
+        }
         if (filterRange) {
           const createdRaw = incident.dateCreated || incident.createdAt;
           if (!createdRaw) return false;
@@ -191,7 +210,7 @@ export default function SpcData() {
         const createdDate = (incident: typeof left) => incident.dateCreated || incident.createdAt || "";
         return createdDate(right).localeCompare(createdDate(left));
       });
-  }, [incidents, machineById, partById, search, filterMachineId, filterCellName, filterRange]);
+  }, [incidents, machineById, partById, search, filterMachineId, filterCellName, filterCharacteristic, filterPartNumber, filterRange]);
 
   const characteristicLabel = (char: Characteristic) =>
     char.charName ? `${char.charNumber} – ${char.charName}` : char.charNumber;
@@ -346,6 +365,8 @@ export default function SpcData() {
   const clearFilters = () => {
     setFilterMachineId(null);
     setFilterCellName(null);
+    setFilterCharacteristic(null);
+    setFilterPartNumber(null);
     setFilterRange(null);
     try {
       window.history.replaceState({}, "", "/spc-data");
@@ -359,7 +380,7 @@ export default function SpcData() {
       <div>
         <h2 className="text-lg font-semibold">Scrap Incidents</h2>
         <p className="text-sm text-muted-foreground">Track incidents by machine, characteristic, quantity, and estimated cost.</p>
-        {(filterMachineId || filterCellName || filterRange) && (
+        {(filterMachineId || filterCellName || filterCharacteristic || filterPartNumber || filterRange) && (
           <div className="text-sm text-muted-foreground mt-1">
             {filterMachineId && (
               <span>
@@ -368,7 +389,11 @@ export default function SpcData() {
             )}
             {filterMachineId && filterCellName && <span className="mx-2">|</span>}
             {filterCellName && <span>Filtering by cell: {filterCellName}</span>}
-            {(filterMachineId || filterCellName) && filterRange && <span className="mx-2">|</span>}
+            {(filterMachineId || filterCellName) && filterCharacteristic && <span className="mx-2">|</span>}
+            {filterCharacteristic && <span>Filtering by characteristic: {filterCharacteristic}</span>}
+            {(filterMachineId || filterCellName || filterCharacteristic) && filterPartNumber && <span className="mx-2">|</span>}
+            {filterPartNumber && <span>Filtering by part number: {filterPartNumber}</span>}
+            {(filterMachineId || filterCellName || filterCharacteristic || filterPartNumber) && filterRange && <span className="mx-2">|</span>}
             {filterRange && (
               <span>
                 Filtering by range: This {filterRange === "week" ? "Week" : filterRange === "month" ? "Month" : "Year"}

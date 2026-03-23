@@ -1365,7 +1365,7 @@ export default function Dashboard() {
                       <button
                         key={`${char.partNumber}-${char.characteristic}`}
                         type="button"
-                        onClick={() => goToSpcData({ search: `${char.partNumber} ${char.characteristic}` })}
+                        onClick={() => goToSpcData({ characteristic: char.characteristic })}
                         className="flex w-full items-center justify-between text-left rounded p-1 hover:bg-muted"
                       >
                         <div className="min-w-0">
@@ -1394,7 +1394,7 @@ export default function Dashboard() {
                       <button
                         key={`${part.partId || "unassigned"}-${idx}`}
                         type="button"
-                        onClick={() => goToSpcData({ search: part.partNumber })}
+                        onClick={() => goToSpcData({ partNumber: part.partNumber })}
                         className="flex w-full items-center justify-between text-left rounded p-1 hover:bg-muted"
                       >
                         <div className="min-w-0">
