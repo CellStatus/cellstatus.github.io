@@ -516,6 +516,12 @@ export default function Dashboard() {
   const scrapCostTrendChart = useMemo(() => {
     const startOfDay = (date: Date) =>
       new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const resolveIncidentDate = (incident: ScrapIncident) => {
+      const rawDate = incident.dateCreated || incident.createdAt || incident.updatedAt;
+      if (!rawDate) return null;
+      const parsed = new Date(rawDate);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    };
     const toIsoDate = (date: Date) => {
       const y = date.getFullYear();
       const m = String(date.getMonth() + 1).padStart(2, "0");
@@ -553,13 +559,6 @@ export default function Dashboard() {
       });
       cursor.setDate(cursor.getDate() + 1);
     }
-
-    const resolveIncidentDate = (incident: ScrapIncident) => {
-      const rawDate = incident.dateCreated || incident.createdAt || incident.updatedAt;
-      if (!rawDate) return null;
-      const parsed = new Date(rawDate);
-      return Number.isNaN(parsed.getTime()) ? null : parsed;
-    };
 
     incidentsWithDate.forEach(({ incident, date: incidentDate }) => {
       const periodKey = toIsoDate(startOfDay(incidentDate));
