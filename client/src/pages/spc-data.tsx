@@ -105,7 +105,10 @@ export default function SpcData() {
       } else if (char) {
         setSearch(char);
       }
-      if (incidentId) setPendingOpenIncidentId(incidentId);
+      if (incidentId) {
+        setFormOpen(true);
+        setPendingOpenIncidentId(incidentId);
+      }
       if (range === "week" || range === "month" || range === "year") {
         setFilterRange(range);
       }
@@ -120,6 +123,9 @@ export default function SpcData() {
     if (target) {
       setPendingOpenIncidentId(null);
       openIncident(target);
+      requestAnimationFrame(() => {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      });
     }
   // openIncident is stable (defined in render scope) — incidents is the real dependency
   // eslint-disable-next-line react-hooks/exhaustive-deps
