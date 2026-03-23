@@ -16,6 +16,7 @@ type DashboardReportData = {
   characteristics: Characteristic[];
   scrapIncidents: ScrapIncident[];
   chartGranularity?: "day" | "week" | "month";
+  chartStartIndex?: number;
 };
 
 const formatCurrency = (value: number) =>
@@ -247,29 +248,51 @@ const getPartTrendByGranularity = (
 const getReportTrendFullHistory = (
   scrapIncidents: ScrapIncident[],
   partById: Map<string, Part>,
+  granularity: "day" | "week" | "month" = "month",
+  startIndex = 0,
 ) => {
+  const startOfDay = (date: Date) =>
+    new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const startOfWeek = (date: Date) => {
+    const day = (date.getDay() + 6) % 7;
+    const monday = new Date(date);
+    monday.setDate(date.getDate() - day);
+    return startOfDay(monday);
+  };
   const startOfMonth = (date: Date) =>
     new Date(date.getFullYear(), date.getMonth(), 1);
+  const getPeriodStart = (date: Date) => {
+    if (granularity === "day") return startOfDay(date);
+    if (granularity === "week") return startOfWeek(date);
+    return startOfMonth(date);
+  };
   const toIsoDate = (date: Date) => {
     const y = date.getFullYear();
     const m = String(date.getMonth() + 1).padStart(2, "0");
     const d = String(date.getDate()).padStart(2, "0");
     return `${y}-${m}-${d}`;
   };
-  const formatPeriodLabel = (date: Date) =>
-    date.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
+  const formatPeriodLabel = (date: Date) => {
+    if (granularity === "day") {
+      return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "2-digit" });
+    }
+    if (granularity === "week") {
+      return `Wk ${date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "2-digit" })}`;
+    }
+    return date.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
+  };
 
   const datedIncidents = scrapIncidents
     .map((incident) => ({ incident, date: parseIncidentDate(incident) }))
     .filter((entry): entry is { incident: ScrapIncident; date: Date } => Boolean(entry.date))
     .sort((left, right) => left.date.getTime() - right.date.getTime());
 
-  const nowMonth = startOfMonth(new Date());
+  const nowMonth = getPeriodStart(new Date());
   const firstMonth = datedIncidents.length > 0
-    ? startOfMonth(datedIncidents[0].date)
+    ? getPeriodStart(datedIncidents[0].date)
     : nowMonth;
   const lastMonth = datedIncidents.length > 0
-    ? startOfMonth(datedIncidents[datedIncidents.length - 1].date)
+    ? getPeriodStart(datedIncidents[datedIncidents.length - 1].date)
     : nowMonth;
 
   const periods: Array<{ key: string; label: string }> = [];
@@ -279,14 +302,24 @@ const getReportTrendFullHistory = (
       key: toIsoDate(cursor),
       label: formatPeriodLabel(cursor),
     });
-    cursor.setMonth(cursor.getMonth() + 1, 1);
+    if (granularity === "day") {
+      cursor.setDate(cursor.getDate() + 1);
+    } else if (granularity === "week") {
+      cursor.setDate(cursor.getDate() + 7);
+    } else {
+      cursor.setMonth(cursor.getMonth() + 1, 1);
+    }
   }
+
+  const maxStartIndex = Math.max(0, periods.length - 1);
+  const clampedStartIndex = Math.min(Math.max(0, startIndex), maxStartIndex);
+  const visiblePeriods = periods.slice(clampedStartIndex);
 
   const periodPartTotals = new Map<string, Map<string, number>>();
   const partTotals = new Map<string, number>();
 
   datedIncidents.forEach(({ incident, date }) => {
-    const periodKey = toIsoDate(startOfMonth(date));
+    const periodKey = toIsoDate(getPeriodStart(date));
     const partNumber = incident.partId ? (partById.get(incident.partId)?.partNumber || "Unknown Part") : "Unassigned";
     const incidentCost = Number(incident.estimatedCost || 0);
 
@@ -310,7 +343,7 @@ const getReportTrendFullHistory = (
   const categoryKeys = hasOther ? [...topPartNumbers, "Other Parts"] : [...topPartNumbers];
   const cumulativeRunningTotals = new Map<string, number>();
 
-  const points: TrendPoint[] = periods.map((period) => {
+  const points: TrendPoint[] = visiblePeriods.map((period) => {
     const periodValues: Record<string, number> = {};
     const cumulativeValues: Record<string, number | null> = {};
     categoryKeys.forEach((key) => {
@@ -640,6 +673,8 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
     parts,
     characteristics,
     scrapIncidents,
+    chartGranularity = "day",
+    chartStartIndex = 0,
   } = data;
   const generatedAt = new Date();
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
@@ -650,7 +685,7 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
   const partById = new Map(parts.map((part) => [part.id, part]));
   const machineById = new Map(machines.map((machine) => [machine.id, machine]));
   const timeRangeMetrics = getTimeRangeMetrics(scrapIncidents);
-  const trend = getReportTrendFullHistory(scrapIncidents, partById);
+  const trend = getReportTrendFullHistory(scrapIncidents, partById, chartGranularity, chartStartIndex);
   const statusCounts = getMachineStatusCounts(machines);
   const openIncidents = scrapIncidents.filter((incident) => incident.status !== "closed");
   const totalIncidentCost = scrapIncidents.reduce((sum, incident) => sum + Number(incident.estimatedCost || 0), 0);
@@ -820,7 +855,10 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
   doc.setTextColor(15, 23, 42);
-  doc.text("Monthly Scrap Cost by Part with All-Incident Accumulated Trendlines (Full History)", marginX, 74);
+  const granularityLabel = chartGranularity === "day" ? "Daily" : chartGranularity === "week" ? "Weekly" : "Monthly";
+  const trendStartLabel = trend.points[0]?.period || "-";
+  const trendEndLabel = trend.points[trend.points.length - 1]?.period || "-";
+  doc.text(`${granularityLabel} Scrap Cost by Part with Accumulated Trendlines (${trendStartLabel} → ${trendEndLabel})`, marginX, 74);
 
   drawStackedBarChart(doc, {
     x: marginX,
@@ -979,7 +1017,7 @@ export function exportDashboardStatusExcel(data: DashboardReportData) {
   const partById = new Map(parts.map((part) => [part.id, part]));
   const machineById = new Map(machines.map((machine) => [machine.id, machine]));
   const timeRangeMetrics = getTimeRangeMetrics(scrapIncidents);
-  const trend = getReportTrendFullHistory(scrapIncidents, partById);
+  const trend = getReportTrendFullHistory(scrapIncidents, partById, "day");
   const statusCounts = getMachineStatusCounts(machines);
   const openIncidents = scrapIncidents.filter((incident) => incident.status !== "closed");
   const totalIncidentCost = scrapIncidents.reduce((sum, incident) => sum + Number(incident.estimatedCost || 0), 0);

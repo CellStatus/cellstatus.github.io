@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Slider } from "@/components/ui/slider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -111,6 +112,8 @@ type TimeRangeMetrics = {
   totalQuantity: number;
 };
 
+type TrendGranularity = "day" | "week" | "month";
+
 export default function Dashboard() {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
@@ -121,6 +124,8 @@ export default function Dashboard() {
   const [deletingMachineId, setDeletingMachineId] = useState<string | null>(null);
   const [expandedCells, setExpandedCells] = useState<Set<string>>(new Set());
   const [isExportingReport, setIsExportingReport] = useState(false);
+  const [trendGranularity, setTrendGranularity] = useState<TrendGranularity>("day");
+  const [trendStartIndex, setTrendStartIndex] = useState(0);
 
   // Fetch machines
   const { data: machines = [], isLoading: machinesLoading } = useQuery<Machine[]>({
@@ -516,6 +521,14 @@ export default function Dashboard() {
   const scrapCostTrendChart = useMemo(() => {
     const startOfDay = (date: Date) =>
       new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const startOfWeek = (date: Date) => {
+      const day = (date.getDay() + 6) % 7;
+      const monday = new Date(date);
+      monday.setDate(date.getDate() - day);
+      return startOfDay(monday);
+    };
+    const startOfMonth = (date: Date) =>
+      new Date(date.getFullYear(), date.getMonth(), 1);
     const resolveIncidentDate = (incident: ScrapIncident) => {
       const rawDate = incident.dateCreated || incident.createdAt || incident.updatedAt;
       if (!rawDate) return null;
@@ -528,8 +541,20 @@ export default function Dashboard() {
       const d = String(date.getDate()).padStart(2, "0");
       return `${y}-${m}-${d}`;
     };
-    const formatPeriodLabel = (date: Date) =>
-      date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "2-digit" });
+    const getPeriodStart = (date: Date) => {
+      if (trendGranularity === "day") return startOfDay(date);
+      if (trendGranularity === "week") return startOfWeek(date);
+      return startOfMonth(date);
+    };
+    const formatPeriodLabel = (date: Date) => {
+      if (trendGranularity === "day") {
+        return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "2-digit" });
+      }
+      if (trendGranularity === "week") {
+        return `Wk ${date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "2-digit" })}`;
+      }
+      return date.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
+    };
 
     const periodPartTotals = new Map<string, Map<string, number>>();
     const partTotals = new Map<string, number>();
@@ -542,26 +567,36 @@ export default function Dashboard() {
       .filter((entry): entry is { incident: ScrapIncident; date: Date } => Boolean(entry.date))
       .sort((left, right) => left.date.getTime() - right.date.getTime());
 
-    const now = startOfDay(new Date());
+    const now = getPeriodStart(new Date());
     const firstDay = incidentsWithDate.length > 0
-      ? startOfDay(incidentsWithDate[0].date)
+      ? getPeriodStart(incidentsWithDate[0].date)
       : now;
     const lastDay = incidentsWithDate.length > 0
-      ? startOfDay(incidentsWithDate[incidentsWithDate.length - 1].date)
+      ? getPeriodStart(incidentsWithDate[incidentsWithDate.length - 1].date)
       : now;
 
-    const periods: Array<{ key: string; label: string }> = [];
+    const allPeriods: Array<{ key: string; label: string }> = [];
     const cursor = new Date(firstDay);
     while (cursor <= lastDay) {
-      periods.push({
+      allPeriods.push({
         key: toIsoDate(cursor),
         label: formatPeriodLabel(cursor),
       });
-      cursor.setDate(cursor.getDate() + 1);
+      if (trendGranularity === "day") {
+        cursor.setDate(cursor.getDate() + 1);
+      } else if (trendGranularity === "week") {
+        cursor.setDate(cursor.getDate() + 7);
+      } else {
+        cursor.setMonth(cursor.getMonth() + 1, 1);
+      }
     }
 
+    const maxStartIndex = Math.max(0, allPeriods.length - 1);
+    const clampedStartIndex = Math.min(Math.max(0, trendStartIndex), maxStartIndex);
+    const visiblePeriods = allPeriods.slice(clampedStartIndex);
+
     incidentsWithDate.forEach(({ incident, date: incidentDate }) => {
-      const periodKey = toIsoDate(startOfDay(incidentDate));
+      const periodKey = toIsoDate(getPeriodStart(incidentDate));
       const partNumber = incident.partId ? (partById.get(incident.partId)?.partNumber || "Unknown Part") : "Unassigned";
       const incidentCost = Number(incident.estimatedCost || 0);
 
@@ -594,7 +629,7 @@ export default function Dashboard() {
 
     const cumulativeRunningTotals = new Map<string, number>();
 
-    const chartData = periods.map((period) => {
+    const chartData = visiblePeriods.map((period) => {
       const row: Record<string, string | number> = {
         period: period.label,
         other: 0,
@@ -637,7 +672,7 @@ export default function Dashboard() {
       "hsl(var(--chart-4))",
       "hsl(var(--chart-5))",
     ];
-    const periodLabel = "Daily";
+    const periodLabel = trendGranularity === "day" ? "Daily" : trendGranularity === "week" ? "Weekly" : "Monthly";
 
     const chartConfig: ChartConfig = {};
     topPartNumbers.forEach((partNumber, index) => {
@@ -679,8 +714,12 @@ export default function Dashboard() {
       hasOther,
       legendItems,
       periodLabel,
+      maxStartIndex,
+      selectedStartLabel: visiblePeriods[0]?.label || "-",
+      selectedEndLabel: visiblePeriods[visiblePeriods.length - 1]?.label || "-",
+      periodCount: visiblePeriods.length,
     };
-  }, [dashboardIncidents, partById, parts]);
+  }, [dashboardIncidents, partById, parts, trendGranularity, trendStartIndex]);
 
   const totalScrapCost = useMemo(() => {
     return incidentsWithCost.reduce((sum, incident) => sum + incident.incidentCost, 0);
@@ -720,7 +759,8 @@ export default function Dashboard() {
         parts,
         characteristics,
         scrapIncidents,
-        chartGranularity: "day",
+        chartGranularity: trendGranularity,
+        chartStartIndex: trendStartIndex,
       });
       toast({ title: "PDF report generated" });
     } catch (error) {
@@ -966,11 +1006,56 @@ export default function Dashboard() {
         <div>
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-lg font-semibold">Scrap Cost by Part Over Time</h2>
+            <div className="inline-flex rounded-md border p-1">
+              {([
+                ["day", "Daily"],
+                ["week", "Weekly"],
+                ["month", "Monthly"],
+              ] as const).map(([value, label]) => (
+                <Button
+                  key={value}
+                  size="sm"
+                  variant={trendGranularity === value ? "default" : "ghost"}
+                  onClick={() => {
+                    setTrendGranularity(value);
+                    setTrendStartIndex(0);
+                  }}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
+          </div>
+          <div className="mb-4 rounded-md border p-3">
+            <div className="flex items-center justify-between text-xs text-muted-foreground mb-2">
+              <span>Trend Start</span>
+              <span>
+                {scrapCostTrendChart.selectedStartLabel} → {scrapCostTrendChart.selectedEndLabel}
+                {" "}({scrapCostTrendChart.periodCount} {scrapCostTrendChart.periodCount === 1 ? "period" : "periods"})
+              </span>
+            </div>
+            <Slider
+              min={0}
+              max={scrapCostTrendChart.maxStartIndex}
+              step={1}
+              value={[Math.min(trendStartIndex, scrapCostTrendChart.maxStartIndex)]}
+              onValueChange={(value) => setTrendStartIndex(value[0] ?? 0)}
+              disabled={scrapCostTrendChart.maxStartIndex === 0}
+            />
+            <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
+              <span>Oldest recorded</span>
+              <span>Most recent recorded</span>
+            </div>
           </div>
           <Card>
             <CardHeader>
               <CardTitle className="text-sm font-medium">
-                Daily (Full History) with Accumulated Trendlines
+                {trendGranularity === "day"
+                  ? "Daily"
+                  : trendGranularity === "week"
+                    ? "Weekly"
+                    : "Monthly"}
+                {" "}(Adjustable Lookback) with Accumulated Trendlines
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -1052,7 +1137,7 @@ export default function Dashboard() {
                 ))}
               </div>
               <p className="mt-2 text-xs text-muted-foreground">
-                Bars show daily scrap cost by part number (side by side). Lines show accumulated scrap cost on the right axis across all recorded incidents.
+                Bars show {trendGranularity} scrap cost by part number (side by side). Lines show accumulated scrap cost on the right axis within the selected timeframe only.
               </p>
             </CardContent>
           </Card>
