@@ -692,7 +692,7 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
   const openIncidentCost = openIncidents.reduce((sum, incident) => sum + Number(incident.estimatedCost || 0), 0);
   const totalScrapQuantity = scrapIncidents.reduce((sum, incident) => sum + Number(incident.quantity || 0), 0);
   const openScrapQuantity = openIncidents.reduce((sum, incident) => sum + Number(incident.quantity || 0), 0);
-  const machinesWithCycleTime = machines.filter((machine) => (machine.idealCycleTime || 0) > 0).length;
+  const machinesWithoutCycleTime = machines.filter((machine) => (machine.idealCycleTime || 0) <= 0).length;
 
   const topIncidents = [...scrapIncidents]
     .filter((incident) => Number(incident.estimatedCost || 0) > 0)
@@ -803,7 +803,7 @@ export function exportDashboardStatusPdf(data: DashboardReportData) {
       ["Setup", statusCounts.setup],
       ["Maintenance", statusCounts.maintenance],
       ["Down", statusCounts.down],
-      ["With Cycle Time", machinesWithCycleTime],
+      ["Without Cycle Time", machinesWithoutCycleTime],
     ],
   });
 
@@ -1024,7 +1024,7 @@ export function exportDashboardStatusExcel(data: DashboardReportData) {
   const openIncidentCost = openIncidents.reduce((sum, incident) => sum + Number(incident.estimatedCost || 0), 0);
   const totalScrapQuantity = scrapIncidents.reduce((sum, incident) => sum + Number(incident.quantity || 0), 0);
   const openScrapQuantity = openIncidents.reduce((sum, incident) => sum + Number(incident.quantity || 0), 0);
-  const machinesWithCycleTime = machines.filter((machine) => (machine.idealCycleTime || 0) > 0).length;
+  const machinesWithoutCycleTime = machines.filter((machine) => (machine.idealCycleTime || 0) <= 0).length;
 
   const topIncidents = [...scrapIncidents]
     .filter((incident) => Number(incident.estimatedCost || 0) > 0)
@@ -1077,7 +1077,7 @@ export function exportDashboardStatusExcel(data: DashboardReportData) {
     ["Setup", statusCounts.setup],
     ["Maintenance", statusCounts.maintenance],
     ["Down", statusCounts.down],
-    ["With Cycle Time", machinesWithCycleTime],
+    ["Without Cycle Time", machinesWithoutCycleTime],
   ]);
 
   appendSheetFromRows(workbook, "Top Scrap Incidents", ["Rank", "Machine", "Part", "Characteristic", "Qty", "Cost"],
