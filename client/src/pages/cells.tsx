@@ -104,6 +104,34 @@ export default function CellsPage() {
   const selectedCell = cells.find((cell) => cell.id === selectedId) || null;
   const isViewMode = selectedCell !== null && !isEditingCell;
 
+  const serializeOperations = (value: CellOperation[]) =>
+    JSON.stringify(
+      value.map((operation) => ({
+        id: operation.id,
+        name: operation.name || "",
+        machineIds: operation.machineIds ?? [],
+      })),
+    );
+
+  const baselineOperations = useMemo(
+    () => (selectedCell ? parseOperations(selectedCell.operationsJson) : []),
+    [selectedCell],
+  );
+
+  const hasUnsavedChanges = useMemo(() => {
+    if (!isEditingCell) return false;
+    const baselineName = selectedCell?.name || "New Cell";
+    const baselineDescription = selectedCell?.description || "";
+    const baselineStatus = selectedCell?.status || "1";
+
+    return (
+      name !== baselineName
+      || description !== baselineDescription
+      || status !== baselineStatus
+      || serializeOperations(operations) !== serializeOperations(baselineOperations)
+    );
+  }, [baselineOperations, description, isEditingCell, name, operations, selectedCell, status]);
+
   const clickableCardProps = (handler: () => void): HTMLAttributes<HTMLDivElement> => ({
     onClick: handler,
     onKeyDown: (event) => {
@@ -339,6 +367,40 @@ export default function CellsPage() {
     onError: () => toast({ title: "Failed to save cell", variant: "destructive" }),
   });
 
+  const resetToNewCellDraft = () => {
+    setSelectedId(null);
+    setIsEditingCell(true);
+    setName("New Cell");
+    setDescription("");
+    setStatus("1");
+    setOperations([]);
+    setMachinePickerByOperation({});
+  };
+
+  const runWithSavePrompt = async (next: () => void) => {
+    if (!hasUnsavedChanges) {
+      next();
+      return;
+    }
+
+    const shouldSave = window.confirm(
+      "You have unsaved cell configuration changes. Press OK to save before leaving this configuration.",
+    );
+
+    if (!shouldSave) return;
+
+    try {
+      await saveMutation.mutateAsync();
+      next();
+    } catch {
+      // save mutation already shows an error toast
+    }
+  };
+
+  const navigateWithSavePrompt = (target: string) => {
+    void runWithSavePrompt(() => setLocation(target));
+  };
+
   const deleteMutation = useMutation({
     mutationFn: (id: string) => apiRequest("DELETE", `/api/cells/${id}`),
     onSuccess: () => {
@@ -364,6 +426,26 @@ export default function CellsPage() {
     setOperations(parseOperations(cell.operationsJson));
     setMachinePickerByOperation({});
   };
+
+  const loadCellWithSavePrompt = (cell: CellConfiguration) => {
+    void runWithSavePrompt(() => loadCell(cell));
+  };
+
+  const startNewCellWithSavePrompt = () => {
+    void runWithSavePrompt(() => resetToNewCellDraft());
+  };
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [hasUnsavedChanges]);
 
   const addOperation = () => {
     setOperations((previous) => [
@@ -459,15 +541,7 @@ export default function CellsPage() {
             <Button
               variant="outline"
               className="w-full"
-              onClick={() => {
-                setSelectedId(null);
-                setIsEditingCell(true);
-                setName("New Cell");
-                setDescription("");
-                setStatus("1");
-                setOperations([]);
-                setMachinePickerByOperation({});
-              }}
+              onClick={startNewCellWithSavePrompt}
             >
               <Plus className="h-4 w-4 mr-2" />
               New Cell
@@ -476,7 +550,7 @@ export default function CellsPage() {
               <button
                 key={cell.id}
                 className={`w-full text-left border rounded p-2 ${selectedId === cell.id ? "border-primary" : "border-border"}`}
-                onClick={() => loadCell(cell)}
+                onClick={() => loadCellWithSavePrompt(cell)}
               >
                 <div className="font-medium">{cell.name}</div>
                 <div className="text-xs text-muted-foreground">Cell Number: {cell.status || "-"}</div>
@@ -489,14 +563,14 @@ export default function CellsPage() {
         <div className="lg:col-span-2 space-y-4">
           {selectedCell && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <Card {...clickableCardProps(() => setLocation(`/machines?cell=${encodeURIComponent(selectedCell.name)}`))}>
+              <Card {...clickableCardProps(() => navigateWithSavePrompt(`/machines?cell=${encodeURIComponent(selectedCell.name)}`))}>
                 <CardContent className="pt-4">
                   <div className="text-xs text-muted-foreground">Machines</div>
                   <div className="text-2xl font-bold">{cellMachines.length}</div>
                   <div className="text-xs text-muted-foreground">View machines in {selectedCell.name}</div>
                 </CardContent>
               </Card>
-              <Card {...clickableCardProps(() => setLocation(`/spc-data?cell=${encodeURIComponent(selectedCell.name)}`))}>
+              <Card {...clickableCardProps(() => navigateWithSavePrompt(`/spc-data?cell=${encodeURIComponent(selectedCell.name)}`))}>
                 <CardContent className="pt-4">
                   <div className="text-xs text-muted-foreground">Scrap Incidents</div>
                   <div className="text-2xl font-bold">{cellIncidents.length}</div>
@@ -518,14 +592,14 @@ export default function CellsPage() {
                   )}
                 </CardContent>
               </Card>
-              <Card {...clickableCardProps(() => setLocation(`/spc-data?cell=${encodeURIComponent(selectedCell.name)}`))}>
+              <Card {...clickableCardProps(() => navigateWithSavePrompt(`/spc-data?cell=${encodeURIComponent(selectedCell.name)}`))}>
                 <CardContent className="pt-4">
                   <div className="text-xs text-muted-foreground">Total Scrap Cost</div>
                   <div className="text-2xl font-bold">${cellTotalScrapCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
                   <div className="text-xs text-muted-foreground">Open incident log for {selectedCell.name}</div>
                 </CardContent>
               </Card>
-              <Card {...clickableCardProps(() => setLocation(`/machines?cell=${encodeURIComponent(selectedCell.name)}`))}>
+              <Card {...clickableCardProps(() => navigateWithSavePrompt(`/machines?cell=${encodeURIComponent(selectedCell.name)}`))}>
                 <CardContent className="pt-4">
                   <div className="text-xs text-muted-foreground flex items-center gap-1">
                     <AlertTriangle className="h-3 w-3" /> Bottleneck
@@ -694,7 +768,7 @@ export default function CellsPage() {
                                   <div className="flex items-center gap-2">
                                     <button
                                       className="font-medium hover:underline text-left"
-                                      onClick={() => setLocation(`/machines?id=${encodeURIComponent(machine.id)}`)}
+                                      onClick={() => navigateWithSavePrompt(`/machines?id=${encodeURIComponent(machine.id)}`)}
                                     >
                                       {machine.name}
                                     </button>
@@ -808,7 +882,7 @@ export default function CellsPage() {
                                     <div className="flex items-center gap-2 flex-wrap">
                                       <button
                                         className="font-medium hover:underline text-left"
-                                        onClick={() => setLocation(`/machines?id=${encodeURIComponent(machine.id)}`)}
+                                        onClick={() => navigateWithSavePrompt(`/machines?id=${encodeURIComponent(machine.id)}`)}
                                       >
                                         {machine.name}
                                       </button>
@@ -829,7 +903,7 @@ export default function CellsPage() {
                                             ? `/spc-data?incidentId=${encodeURIComponent(charIncidents[0].id)}`
                                             : `/spc-data?char=${encodeURIComponent(char)}&machineId=${encodeURIComponent(machine.id)}`;
                                           return (
-                                            <button key={char} onClick={() => setLocation(href)} className="inline-flex">
+                                            <button key={char} onClick={() => navigateWithSavePrompt(href)} className="inline-flex">
                                               <Badge variant="secondary" className="text-xs cursor-pointer hover:bg-secondary/80">{char}</Badge>
                                             </button>
                                           );
