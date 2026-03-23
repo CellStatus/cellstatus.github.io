@@ -1289,43 +1289,6 @@ export default function Dashboard() {
           </Card>
         </div>
 
-        {/* Scrap Incidents by Cell */}
-        <div>
-          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <Factory className="h-5 w-5" />
-            Scrap Incidents by Cell
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            {cellScrapSummary.length === 0 ? (
-              <Card>
-                <CardContent>
-                  <div className="text-sm text-muted-foreground">No scrap incidents by cell</div>
-                </CardContent>
-              </Card>
-            ) : (
-              cellScrapSummary.map((cell) => (
-                <Card key={cell.cellName} {...clickableCardProps(() => setLocation(`/cells?cell=${encodeURIComponent(cell.cellName)}`))}>
-                  <CardHeader>
-                    <CardTitle className="text-sm font-medium">{cell.cellName}</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="text-xs text-muted-foreground">Incidents</div>
-                        <div className="text-2xl font-bold">{cell.incidentCount}</div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-xs text-muted-foreground">Scrap Cost</div>
-                        <div className="text-2xl font-bold text-rose-600">${cell.totalCost.toLocaleString()}</div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))
-            )}
-          </div>
-        </div>
-
         {/* Scrap Cost Leaderboard */}
         <div>
           <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
@@ -1343,9 +1306,11 @@ export default function Dashboard() {
                 ) : (
                   <div className="space-y-2">
                     {machineScrapSummary.slice(0, 5).map((machine, idx) => (
-                      <div
+                      <button
                         key={machine.machineId}
-                        className="flex items-center justify-between"
+                        type="button"
+                        onClick={() => goToSpcData({ machineId: machine.machineId })}
+                        className="flex w-full items-center justify-between text-left rounded p-1 hover:bg-muted"
                       >
                         <div className="min-w-0">
                           <div className="text-xs text-muted-foreground">#{idx + 1}</div>
@@ -1353,7 +1318,7 @@ export default function Dashboard() {
                           <div className="text-xs text-muted-foreground">{machine.totalQuantity} pc{machine.totalQuantity !== 1 ? "s" : ""} scrapped</div>
                         </div>
                         <div className="font-semibold text-rose-600">${machine.totalCost.toLocaleString()}</div>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 )}
@@ -1373,7 +1338,7 @@ export default function Dashboard() {
                         key={cell.cellName}
                         type="button"
                         onClick={() => goToSpcData({ cell: cell.cellName })}
-                        className="flex w-full items-center justify-between text-left"
+                        className="flex w-full items-center justify-between text-left rounded p-1 hover:bg-muted"
                       >
                         <div className="min-w-0">
                           <div className="text-xs text-muted-foreground">#{idx + 1}</div>
@@ -1397,7 +1362,12 @@ export default function Dashboard() {
                 ) : (
                   <div className="space-y-2">
                     {charScrapSummary.slice(0, 5).map((char, idx) => (
-                      <div key={`${char.partNumber}-${char.characteristic}`} className="flex items-center justify-between">
+                      <button
+                        key={`${char.partNumber}-${char.characteristic}`}
+                        type="button"
+                        onClick={() => goToSpcData({ search: `${char.partNumber} ${char.characteristic}` })}
+                        className="flex w-full items-center justify-between text-left rounded p-1 hover:bg-muted"
+                      >
                         <div className="min-w-0">
                           <div className="text-xs text-muted-foreground">#{idx + 1}</div>
                           <div className="text-sm truncate">Char # {char.characteristic}</div>
@@ -1405,7 +1375,7 @@ export default function Dashboard() {
                           <div className="text-xs text-muted-foreground">{char.totalQuantity} pc{char.totalQuantity !== 1 ? "s" : ""} scrapped</div>
                         </div>
                         <div className="font-semibold text-rose-600">${char.totalCost.toLocaleString()}</div>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 )}
@@ -1421,14 +1391,19 @@ export default function Dashboard() {
                 ) : (
                   <div className="space-y-2">
                     {partScrapSummary.slice(0, 5).map((part, idx) => (
-                      <div key={`${part.partId || "unassigned"}-${idx}`} className="flex items-center justify-between">
+                      <button
+                        key={`${part.partId || "unassigned"}-${idx}`}
+                        type="button"
+                        onClick={() => goToSpcData({ search: part.partNumber })}
+                        className="flex w-full items-center justify-between text-left rounded p-1 hover:bg-muted"
+                      >
                         <div className="min-w-0">
                           <div className="text-xs text-muted-foreground">#{idx + 1}</div>
                           <div className="text-sm truncate">{part.partName ? `${part.partNumber} - ${part.partName}` : part.partNumber}</div>
                           <div className="text-xs text-muted-foreground">{part.totalQuantity} pc{part.totalQuantity !== 1 ? "s" : ""} scrapped</div>
                         </div>
                         <div className="font-semibold text-rose-600">${part.totalCost.toLocaleString()}</div>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 )}

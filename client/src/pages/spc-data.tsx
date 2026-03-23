@@ -90,6 +90,7 @@ export default function SpcData() {
       const machineId = u.searchParams.get("machineId");
       const cell = u.searchParams.get("cell");
       const char = u.searchParams.get("char");
+      const searchText = u.searchParams.get("search");
       const incidentId = u.searchParams.get("incidentId");
       const range = u.searchParams.get("range");
       if (machineId) {
@@ -99,7 +100,11 @@ export default function SpcData() {
       if (cell) {
         setFilterCellName(cell);
       }
-      if (char) setSearch(char);
+      if (searchText) {
+        setSearch(searchText);
+      } else if (char) {
+        setSearch(char);
+      }
       if (incidentId) setPendingOpenIncidentId(incidentId);
       if (range === "week" || range === "month" || range === "year") {
         setFilterRange(range);
